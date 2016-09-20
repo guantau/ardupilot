@@ -36,6 +36,8 @@ public:
 
     bool logging_started() { return _logging_started; }
 
+    void stop_logging();
+
     /* Write a block of data at current offset */
     bool WritePrioritisedBlock(const void *pBuffer, uint16_t size,
                                bool is_critical) override;
@@ -124,6 +126,10 @@ protected:
         uint8_t state_sent_min;
         uint8_t state_sent_max;
     } stats;
+
+    // this method is used when reporting system status over mavlink
+    bool logging_enabled() const { return true; }
+    bool logging_failed() const;
 
 private:
     mavlink_channel_t _chan;

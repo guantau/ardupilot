@@ -21,7 +21,10 @@
 #include <AP_ADC/AP_ADC.h>
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
+#include <AP_HAL/I2CDevice.h>
 #include <AP_Math/AP_Math.h>
+#include <GCS_MAVLink/GCS.h>
+#include <utility>
 
 extern const AP_HAL::HAL &hal;
 
@@ -48,19 +51,30 @@ extern const AP_HAL::HAL &hal;
  #define ARSPD_DEFAULT_PIN 0
 #elif defined(CONFIG_ARCH_BOARD_VRUBRAIN_V52)
  #define ARSPD_DEFAULT_PIN 0
-#elif defined(CONFIG_ARCH_BOARD_VRHERO_V10)
+#elif defined(CONFIG_ARCH_BOARD_VRCORE_V10)
+ #define ARSPD_DEFAULT_PIN 0
+#elif defined(CONFIG_ARCH_BOARD_VRBRAIN_V54)
  #define ARSPD_DEFAULT_PIN 0
 #elif defined(CONFIG_ARCH_BOARD_PX4FMU_V1)
  #define ARSPD_DEFAULT_PIN 11
 #else
  #define ARSPD_DEFAULT_PIN 15
 #endif
-#elif CONFIG_HAL_BOARD == HAL_BOARD_FLYMAPLE
- #define ARSPD_DEFAULT_PIN 16
 #elif CONFIG_HAL_BOARD == HAL_BOARD_LINUX
- #define ARSPD_DEFAULT_PIN AP_AIRSPEED_I2C_PIN
+    #if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO2 || CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO
+         #define ARSPD_DEFAULT_PIN 5
+    #else
+         #define ARSPD_DEFAULT_PIN AP_AIRSPEED_I2C_PIN
+    #endif
+    #if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DISCO
+         #define PSI_RANGE_DEFAULT 0.05
+    #endif
 #else
  #define ARSPD_DEFAULT_PIN 0
+#endif
+
+#ifndef PSI_RANGE_DEFAULT
+#define PSI_RANGE_DEFAULT 1.0f
 #endif
 
 // table of user settable parameters
@@ -70,7 +84,7 @@ const AP_Param::GroupInfo AP_Airspeed::var_info[] = {
     // @DisplayName: Airspeed enable
     // @Description: enable airspeed sensor
     // @Values: 0:Disable,1:Enable
-    AP_GROUPINFO("ENABLE",    0, AP_Airspeed, _enable, 1),
+    AP_GROUPINFO_FLAGS("ENABLE", 0, AP_Airspeed, _enable, 1, AP_PARAM_FLAG_ENABLE),
 
     // @Param: USE
     // @DisplayName: Airspeed use
@@ -115,8 +129,22 @@ const AP_Param::GroupInfo AP_Airspeed::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("SKIP_CAL",  7, AP_Airspeed, _skip_cal, 0),
 
+    // @Param: PSI_RANGE
+    // @DisplayName: The PSI range of the device
+    // @Description: This parameter allows you to to set the PSI (pounds per square inch) range for your sensor. You should not change this unless you examine the datasheet for your device
+    // @User: Advanced
+    AP_GROUPINFO("PSI_RANGE",  8, AP_Airspeed, _psi_range, PSI_RANGE_DEFAULT),
+    
     AP_GROUPEND
 };
+
+
+AP_Airspeed::AP_Airspeed()
+    : _EAS2TAS(1.0f)
+    , _calibration()
+{
+    AP_Param::setup_object_defaults(this, var_info);
+}
 
 
 /*
@@ -172,8 +200,6 @@ bool AP_Airspeed::get_temperature(float &temperature)
 // the get_airspeed() interface can be used
 void AP_Airspeed::calibrate(bool in_startup)
 {
-    float sum = 0;
-    uint8_t count = 0;
     if (!_enable) {
         return;
     }
@@ -182,24 +208,35 @@ void AP_Airspeed::calibrate(bool in_startup)
     }
     // discard first reading
     get_pressure();
-    for (uint8_t i = 0; i < 10; i++) {
-        hal.scheduler->delay(100);
-        float p = get_pressure();
-        if (_healthy) {
-            sum += p;
-            count++;
+    _cal.start_ms = AP_HAL::millis();
+    _cal.count = 0;
+    _cal.sum = 0;
+    _cal.read_count = 0;
+}
+
+/*
+  update async airspeed calibration
+*/
+void AP_Airspeed::update_calibration(float raw_pressure)
+{
+    // consider calibration complete when we have at least 10 samples
+    // over at least 1 second
+    if (AP_HAL::millis() - _cal.start_ms >= 1000 &&
+        _cal.read_count > 10) {
+        if (_cal.count == 0) {
+            GCS_MAVLINK::send_statustext_all(MAV_SEVERITY_INFO, "Airspeed sensor unhealthy");
+        } else {
+            GCS_MAVLINK::send_statustext_all(MAV_SEVERITY_INFO, "Airspeed sensor calibrated");
+            _offset.set_and_save(_cal.sum / _cal.count);
         }
-    }
-    if (count == 0) {
-        // unhealthy sensor
-        hal.console->println("Airspeed sensor unhealthy");
-        _offset.set(0);
+        _cal.start_ms = 0;
         return;
     }
-    float raw = sum/count;
-    _offset.set_and_save(raw);
-    _airspeed = 0;
-    _raw_airspeed = 0;
+    if (_healthy) {
+        _cal.sum += raw_pressure;
+        _cal.count++;
+    }
+    _cal.read_count++;
 }
 
 // read the airspeed sensor
@@ -209,10 +246,15 @@ void AP_Airspeed::read(void)
     if (!_enable) {
         return;
     }
-    airspeed_pressure = get_pressure() - _offset;
+    float raw_pressure = get_pressure();
+    if (_cal.start_ms != 0) {
+        update_calibration(raw_pressure);
+    }
+    
+    airspeed_pressure = raw_pressure - _offset;
 
     // remember raw pressure for logging
-    _raw_pressure     = airspeed_pressure;
+    _corrected_pressure = airspeed_pressure;
 
     /*
       we support different pitot tube setups so used can choose if

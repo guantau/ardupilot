@@ -30,6 +30,7 @@ class HAL_SITL;
 class HALSITL::SITL_State {
     friend class HALSITL::Scheduler;
     friend class HALSITL::Util;
+    friend class HALSITL::GPIO;
 public:
     void init(int argc, char * const argv[]);
 
@@ -51,6 +52,10 @@ public:
         return _base_port;
     }
 
+    bool use_rtscts(void) const {
+        return _use_rtscts;
+    }
+    
     // simulated airspeed, sonar and battery monitor
     uint16_t sonar_pin_value;    // pin 0
     uint16_t airspeed_pin_value; // pin 1
@@ -84,6 +89,8 @@ private:
     void _update_compass(float rollDeg, float pitchDeg, float yawDeg);
     void _update_flow(void);
 
+    void _set_signal_handlers(void) const;
+
     struct gps_data {
         double latitude;
         double longitude;
@@ -111,6 +118,10 @@ private:
     void _sbp_send_message(uint16_t msg_type, uint16_t sender_id, uint8_t len, uint8_t *payload);
     void _update_gps_sbp(const struct gps_data *d);
     void _update_gps_file(const struct gps_data *d);
+    void _update_gps_nova(const struct gps_data *d);
+    void _nova_send_message(uint8_t *header, uint8_t headerlength, uint8_t *payload, uint8_t payloadlen);
+    uint32_t CRC32Value(uint32_t icrc);
+    uint32_t CalculateBlockCRC32(uint32_t length, uint8_t *buffer, uint32_t crc);
 
     void _update_gps(double latitude, double longitude, float altitude,
                      double speedN, double speedE, double speedD, bool have_lock);
@@ -147,7 +158,9 @@ private:
     Scheduler *_scheduler;
     Compass *_compass;
     OpticalFlow *_optical_flow;
+#if AP_TERRAIN_AVAILABLE
     AP_Terrain *_terrain;
+#endif
 
     SocketAPM _sitl_rc_in{true};
     SITL::SITL *_sitl;
@@ -157,6 +170,8 @@ private:
 
     bool _synthetic_clock_mode;
 
+    bool _use_rtscts;
+    
     const char *_fdm_address;
 
     // delay buffer variables
@@ -204,8 +219,7 @@ private:
     bool enable_gimbal;
     SITL::Gimbal *gimbal;
 
-    // simulated gimbal
-    bool enable_ADSB;
+    // simulated ADSb
     SITL::ADSB *adsb;
 
     // output socket for flightgear viewing
@@ -215,6 +229,8 @@ private:
     const char *_client_address;
 
     const char *defaults_path = HAL_PARAM_DEFAULTS_PATH;
+
+    const char *_home_str;
 };
 
 #endif // CONFIG_HAL_BOARD == HAL_BOARD_SITL

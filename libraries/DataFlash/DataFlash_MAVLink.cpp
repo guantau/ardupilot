@@ -19,6 +19,8 @@
  # define Debug(fmt, args ...)
 #endif
 
+#include <GCS_MAVLink/GCS.h>
+
 extern const AP_HAL::HAL& hal;
 
 
@@ -48,6 +50,11 @@ void DataFlash_MAVLink::Init()
                              // everything until a client connects.
                              // This stops calls to start_new_log from
                              // the vehicles
+}
+
+bool DataFlash_MAVLink::logging_failed() const
+{
+    return !_sending_to_client;
 }
 
 uint16_t DataFlash_MAVLink::bufferspace_available() {
@@ -201,6 +208,14 @@ void DataFlash_MAVLink::free_all_blocks()
     _latest_block_len = 0;
 }
 
+void DataFlash_MAVLink::stop_logging()
+{
+    if (_sending_to_client) {
+        _sending_to_client = false;
+        _last_response_time = AP_HAL::millis();
+    }
+}
+
 void DataFlash_MAVLink::handle_ack(mavlink_channel_t chan,
                                    mavlink_message_t* msg,
                                    uint32_t seqno)
@@ -210,10 +225,7 @@ void DataFlash_MAVLink::handle_ack(mavlink_channel_t chan,
     }
     if(seqno == MAV_REMOTE_LOG_DATA_BLOCK_STOP) {
         Debug("Received stop-logging packet");
-        if (_sending_to_client) {
-            _sending_to_client = false;
-            _last_response_time = AP_HAL::millis();
-        }
+        stop_logging();
         return;
     }
     if(seqno == MAV_REMOTE_LOG_DATA_BLOCK_START) {
@@ -231,7 +243,7 @@ void DataFlash_MAVLink::handle_ack(mavlink_channel_t chan,
             _target_component_id = msg->compid;
             _chan = chan;
             _next_seq_num = 0;
-            _startup_messagewriter->reset();
+            start_new_log_reset_variables();
             _last_response_time = AP_HAL::millis();
             Debug("Target: (%u/%u)", _target_system_id, _target_component_id);
         }
@@ -521,7 +533,7 @@ bool DataFlash_MAVLink::send_log_block(struct dm_block &block)
     if (!_initialised) {
        return false;
     }
-    if (comm_get_txspace(chan) < MAVLINK_MSG_ID_REMOTE_LOG_DATA_BLOCK_LEN) {
+    if (!HAVE_PAYLOAD_SPACE(chan, REMOTE_LOG_DATA_BLOCK)) {
         return false;
     }
     if (comm_get_txspace(chan) < 500) {

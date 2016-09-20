@@ -15,6 +15,7 @@
 
 #include <SITL/SIM_Multicopter.h>
 #include <SITL/SIM_Helicopter.h>
+#include <SITL/SIM_SingleCopter.h>
 #include <SITL/SIM_Plane.h>
 #include <SITL/SIM_QuadPlane.h>
 #include <SITL/SIM_Rover.h>
@@ -25,6 +26,8 @@
 #include <SITL/SIM_Tracker.h>
 #include <SITL/SIM_Balloon.h>
 #include <SITL/SIM_FlightAxis.h>
+#include <SITL/SIM_Calibration.h>
+#include <SITL/SIM_XPlane.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -49,7 +52,6 @@ void SITL_State::_usage(void)
            "\t--instance N       set instance of SITL (adds 10*instance to all port numbers)\n"
            "\t--speedup SPEEDUP  set simulation speedup\n"
            "\t--gimbal           enable simulated MAVLink gimbal\n"
-           "\t--adsb             enable simulated ADSB peripheral\n"
            "\t--autotest-dir DIR set directory for additional files\n"
            "\t--uartA device     set device string for UARTA\n"
            "\t--uartB device     set device string for UARTB\n"
@@ -65,6 +67,7 @@ static const struct {
     Aircraft *(*constructor)(const char *home_str, const char *frame_str);
 } model_constructors[] = {
     { "quadplane",          QuadPlane::create },
+    { "xplane",             XPlane::create },
     { "firefly",            QuadPlane::create },
     { "+",                  MultiCopter::create },
     { "quad",               MultiCopter::create },
@@ -77,6 +80,8 @@ static const struct {
     { "heli",               Helicopter::create },
     { "heli-dual",          Helicopter::create },
     { "heli-compound",      Helicopter::create },
+    { "singlecopter",       SingleCopter::create },
+    { "coaxcopter",         SingleCopter::create },
     { "rover",              SimRover::create },
     { "crrcsim",            CRRCSim::create },
     { "jsbsim",             JSBSim::create },
@@ -86,7 +91,23 @@ static const struct {
     { "tracker",            Tracker::create },
     { "balloon",            Balloon::create },
     { "plane",              Plane::create },
+    { "calibration",        Calibration::create },
 };
+
+void SITL_State::_set_signal_handlers(void) const
+{
+    struct sigaction sa_fpe = {};
+
+    sigemptyset(&sa_fpe.sa_mask);
+    sa_fpe.sa_handler = _sig_fpe;
+    sigaction(SIGFPE, &sa_fpe, nullptr);
+
+    struct sigaction sa_pipe = {};
+
+    sigemptyset(&sa_pipe.sa_mask);
+    sa_pipe.sa_handler = SIG_IGN; /* No-op SIGPIPE handler */
+    sigaction(SIGPIPE, &sa_pipe, nullptr);
+}
 
 void SITL_State::_parse_command_line(int argc, char * const argv[])
 {
@@ -101,9 +122,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         AP_HAL::panic("out of memory");
     }
 
-    signal(SIGFPE, _sig_fpe);
-    // No-op SIGPIPE handler
-    signal(SIGPIPE, SIG_IGN);
+    _set_signal_handlers();
 
     setvbuf(stdout, (char *)0, _IONBF, 0);
     setvbuf(stderr, (char *)0, _IONBF, 0);
@@ -126,7 +145,7 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         CMDLINE_UARTD,
         CMDLINE_UARTE,
         CMDLINE_UARTF,
-        CMDLINE_ADSB,
+        CMDLINE_RTSCTS,
         CMDLINE_DEFAULTS
     };
 
@@ -148,9 +167,9 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         {"uartE",           true,   0, CMDLINE_UARTE},
         {"client",          true,   0, CMDLINE_CLIENT},
         {"gimbal",          false,  0, CMDLINE_GIMBAL},
-        {"adsb",            false,  0, CMDLINE_ADSB},
         {"autotest-dir",    true,   0, CMDLINE_AUTOTESTDIR},
         {"defaults",        true,   0, CMDLINE_DEFAULTS},
+        {"rtscts",          false,  0, CMDLINE_RTSCTS},
         {0, false, 0, 0}
     };
 
@@ -200,8 +219,8 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
         case CMDLINE_GIMBAL:
             enable_gimbal = true;
             break;
-        case CMDLINE_ADSB:
-            enable_ADSB = true;
+        case CMDLINE_RTSCTS:
+            _use_rtscts = true;
             break;
         case CMDLINE_AUTOTESTDIR:
             autotest_dir = strdup(gopt.optarg);
@@ -240,6 +259,10 @@ void SITL_State::_parse_command_line(int argc, char * const argv[])
             printf("Started model %s at %s at speed %.1f\n", model_str, home_str, speedup);
             break;
         }
+    }
+    if (sitl_model == nullptr) {
+        printf("Vehicle model (%s) not found\n", model_str);
+        exit(1);
     }
 
     fprintf(stdout, "Starting sketch '%s'\n", SKETCH);

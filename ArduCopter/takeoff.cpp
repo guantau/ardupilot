@@ -38,9 +38,11 @@ bool Copter::do_user_takeoff(float takeoff_alt_cm, bool must_navigate)
 
         switch(control_mode) {
             case GUIDED:
-                set_auto_armed(true);
-                guided_takeoff_start(takeoff_alt_cm);
-                return true;
+                if (guided_takeoff_start(takeoff_alt_cm)) {
+                    set_auto_armed(true);
+                    return true;
+                }
+                return false;
             case LOITER:
             case POSHOLD:
             case ALT_HOLD:
@@ -140,4 +142,43 @@ void Copter::takeoff_get_climb_rates(float& pilot_climb_rate, float& takeoff_cli
             pilot_climb_rate = 0.0f;
         }
     }
+}
+
+void Copter::auto_takeoff_set_start_alt(void)
+{
+    // start with our current altitude
+    auto_takeoff_no_nav_alt_cm = inertial_nav.get_altitude();
+    
+    if (!motors.armed() || !ap.auto_armed || !motors.get_interlock() || ap.land_complete) {
+        // we are not flying, add the wp_navalt_min
+        auto_takeoff_no_nav_alt_cm += g2.wp_navalt_min * 100;
+    }
+}
+
+
+/*
+  call attitude controller for automatic takeoff, limiting roll/pitch
+  if below wp_navalt_min
+ */
+void Copter::auto_takeoff_attitude_run(float target_yaw_rate)
+{
+    float nav_roll, nav_pitch;
+    
+    if (g2.wp_navalt_min > 0 && inertial_nav.get_altitude() < auto_takeoff_no_nav_alt_cm) {
+        // we haven't reached the takeoff navigation altitude yet
+        nav_roll = 0;
+        nav_pitch = 0;
+#if FRAME_CONFIG == HELI_FRAME
+        // prevent hover roll starting till past specified altitude
+        hover_roll_trim_scalar_slew = 0;        
+#endif
+        // tell the position controller that we have limited roll/pitch demand to prevent integrator buildup
+        pos_control.set_limit_accel_xy();
+    } else {
+        nav_roll = wp_nav.get_roll();
+        nav_pitch = wp_nav.get_pitch();
+    }
+    
+    // roll & pitch from waypoint controller, yaw rate from pilot
+    attitude_control.input_euler_angle_roll_pitch_euler_rate_yaw(nav_roll, nav_pitch, target_yaw_rate, get_smoothing_gain());
 }

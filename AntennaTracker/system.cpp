@@ -1,6 +1,7 @@
 // -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
 #include "Tracker.h"
+#include "version.h"
 
 // mission storage
 static const StorageAccess wp_storage(StorageManager::StorageMission);
@@ -27,46 +28,39 @@ void Tracker::init_tracker()
     // Check the EEPROM format version before loading any parameters from EEPROM
     load_parameters();
 
-    BoardConfig.init();
+    GCS_MAVLINK::set_dataflash(&DataFlash);
 
     // initialise serial ports
     serial_manager.init();
 
-    // init baro before we start the GCS, so that the CLI baro test works
-    barometer.init();
-
-    // init the GCS and start snooping for vehicle data
-    gcs[0].setup_uart(serial_manager, AP_SerialManager::SerialProtocol_Console, 0);
-    gcs[0].set_snoop(mavlink_snoop_static);
+    // setup first port early to allow BoardConfig to report errors
+    gcs[0].setup_uart(serial_manager, AP_SerialManager::SerialProtocol_MAVLink, 0);
 
     // Register mavlink_delay_cb, which will run anytime you have
     // more than 5ms remaining in your call to hal.scheduler->delay
     hal.scheduler->register_delay_callback(mavlink_delay_cb_static, 5);
+    
+    BoardConfig.init();
+
+    // init baro before we start the GCS, so that the CLI baro test works
+    barometer.init();
 
     // we start by assuming USB connected, as we initialed the serial
     // port with SERIAL0_BAUD. check_usb_mux() fixes this if need be.    
     usb_connected = true;
     check_usb_mux();
 
-    // setup serial port for telem1 and start snooping for vehicle data
-    gcs[1].setup_uart(serial_manager, AP_SerialManager::SerialProtocol_MAVLink, 0);
-    gcs[1].set_snoop(mavlink_snoop_static);
-
-    // setup serial port for telem2 and start snooping for vehicle data
-    gcs[2].setup_uart(serial_manager, AP_SerialManager::SerialProtocol_MAVLink, 1);
-    gcs[2].set_snoop(mavlink_snoop_static);
-
-    // setup serial port for fourth telemetry port (not used by default) and start snooping for vehicle data
-    gcs[3].setup_uart(serial_manager, AP_SerialManager::SerialProtocol_MAVLink, 2);
-    gcs[3].set_snoop(mavlink_snoop_static);
+    // setup telem slots with serial ports
+    for (uint8_t i = 1; i < MAVLINK_COMM_NUM_BUFFERS; i++) {
+        gcs[i].setup_uart(serial_manager, AP_SerialManager::SerialProtocol_MAVLink, i);
+        gcs[i].set_snoop(mavlink_snoop_static);
+    }
 
     mavlink_system.sysid = g.sysid_this_mav;
 
 #if LOGGING_ENABLED == ENABLED
     log_init();
 #endif
-
-    GCS_MAVLINK::set_dataflash(&DataFlash);
 
     if (g.compass_enabled==true) {
         if (!compass.init() || !compass.read()) {
@@ -86,7 +80,7 @@ void Tracker::init_tracker()
     ins.init(scheduler.get_loop_rate_hz());
     ahrs.reset();
 
-    init_barometer();
+    init_barometer(true);
 
     // set serial ports non-blocking
     serial_manager.set_blocking_writes_all(false);
@@ -100,6 +94,7 @@ void Tracker::init_tracker()
     if (fabsf(g.start_latitude) <= 90.0f && fabsf(g.start_longitude) <= 180.0f) {
         current_loc.lat = g.start_latitude * 1.0e7f;
         current_loc.lng = g.start_longitude * 1.0e7f;
+    } else {
         gcs_send_text(MAV_SEVERITY_NOTICE, "Ignoring invalid START_LATITUDE or START_LONGITUDE parameter");
     }
 
@@ -121,8 +116,6 @@ void Tracker::init_tracker()
         prepare_servos();
     }
 
-    // calibrate pressure on startup by default
-    nav_status.need_altitude_calibration = true;
 }
 
 // updates the status of the notify objects
@@ -188,8 +181,8 @@ void Tracker::disarm_servos()
 void Tracker::prepare_servos()
 {
     start_time_ms = AP_HAL::millis();
-    channel_yaw.radio_out = channel_yaw.radio_trim;
-    channel_pitch.radio_out = channel_pitch.radio_trim;
+    channel_yaw.set_radio_out(channel_yaw.get_radio_trim());
+    channel_pitch.set_radio_out(channel_pitch.get_radio_trim());
     channel_yaw.output();
     channel_pitch.output();
 }

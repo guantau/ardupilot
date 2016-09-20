@@ -51,12 +51,12 @@ void Rover::read_control_switch()
 uint8_t Rover::readSwitch(void){
     uint16_t pulsewidth = hal.rcin->read(g.mode_channel - 1);
 	if (pulsewidth <= 900 || pulsewidth >= 2200) 	return 255;	// This is an error condition
-	if (pulsewidth > 1230 && pulsewidth <= 1360) 	return 1;
-	if (pulsewidth > 1360 && pulsewidth <= 1490) 	return 2;
-	if (pulsewidth > 1490 && pulsewidth <= 1620) 	return 3;
-	if (pulsewidth > 1620 && pulsewidth <= 1749) 	return 4;	// Software Manual
-	if (pulsewidth >= 1750) 						return 5;	// Hardware Manual
-	return 0;
+	if (pulsewidth <= 1230)     return 0;
+	if (pulsewidth <= 1360) 	return 1;
+	if (pulsewidth <= 1490) 	return 2;
+	if (pulsewidth <= 1620) 	return 3;
+	if (pulsewidth <= 1749) 	return 4;	// Software Manual
+	return 5;	// Hardware Manual
 }
 
 void Rover::reset_control_switch()
@@ -75,7 +75,7 @@ void Rover::read_trim_switch()
     case CH7_DO_NOTHING:
         break;
     case CH7_SAVE_WP:
-		if (channel_learn->radio_in > CH_7_PWM_TRIGGER) {
+		if (channel_learn->get_radio_in() > CH_7_PWM_TRIGGER) {
             // switch is engaged
 			ch7_flag = true;
 		} else { // switch is disengaged
@@ -86,7 +86,7 @@ void Rover::read_trim_switch()
                     hal.console->println("Erasing waypoints");
                     // if SW7 is ON in MANUAL = Erase the Flight Plan
 					mission.clear();
-                    if (channel_steer->control_in > 3000) {
+                    if (channel_steer->get_control_in() > 3000) {
 						// if roll is full right store the current location as home
                         init_home();
                     }

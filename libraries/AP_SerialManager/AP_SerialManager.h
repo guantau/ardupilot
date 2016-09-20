@@ -43,8 +43,8 @@
 #define AP_SERIALMANAGER_MAVLINK_BUFSIZE_RX     128
 #define AP_SERIALMANAGER_MAVLINK_BUFSIZE_TX     256
 
-// mavlink default baud rates, use default buffer sizes
-#define AP_SERIALMANAGER_FRSKY_DPORT_BAUD       9600
+// FrSky default baud rates, use default buffer sizes
+#define AP_SERIALMANAGER_FRSKY_D_BAUD           9600
 #define AP_SERIALMANAGER_FRSKY_SPORT_BAUD       57600
 #define AP_SERIALMANAGER_FRSKY_BUFSIZE_RX       0
 #define AP_SERIALMANAGER_FRSKY_BUFSIZE_TX       0
@@ -71,16 +71,17 @@ public:
 
     enum SerialProtocol {
         SerialProtocol_None = -1,
-        SerialProtocol_Console = 0,
+        SerialProtocol_Console = 0, // unused
         SerialProtocol_MAVLink = 1,
-        SerialProtocol_MAVLink2 = 2,    // do not use - use MAVLink and provide instance of 1
-        SerialProtocol_FRSky_DPort = 3,
-        SerialProtocol_FRSky_SPort = 4,
+        SerialProtocol_MAVLink2 = 2,                 // do not use - use MAVLink and provide instance of 1
+        SerialProtocol_FrSky_D = 3,                  // FrSky D protocol (D-receivers)
+        SerialProtocol_FrSky_SPort = 4,              // FrSky SPort protocol (X-receivers)
         SerialProtocol_GPS = 5,
-        SerialProtocol_GPS2 = 6,        // do not use - use GPS and provide instance of 1
+        SerialProtocol_GPS2 = 6,                     // do not use - use GPS and provide instance of 1
         SerialProtocol_AlexMos = 7,
         SerialProtocol_SToRM32 = 8,
         SerialProtocol_Lidar = 9,
+        SerialProtocol_FrSky_SPort_Passthrough = 10, // FrSky SPort Passthrough (OpenTX) protocol (X-receivers)
     };
 
     // Constructor
@@ -107,6 +108,10 @@ public:
     //  returns true if a channel is found, false if not
     bool get_mavlink_channel(enum SerialProtocol protocol, uint8_t instance, mavlink_channel_t &mav_chan) const;
 
+    // get_mavlink_protocol - provides the specific MAVLink protocol for a
+    // given channel, or SerialProtocol_None if not found
+    SerialProtocol get_mavlink_protocol(mavlink_channel_t mav_chan) const;
+    
     // set_blocking_writes_all - sets block_writes on or off for all serial channels
     void set_blocking_writes_all(bool blocking);
 

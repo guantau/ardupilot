@@ -45,6 +45,7 @@ set(config_module_list
     systemcmds/reflect
     systemcmds/motor_test
     systemcmds/usb_connected
+    systemcmds/otp
 
 #
 # Library modules
@@ -63,7 +64,6 @@ set(config_extra_builtin_cmds
 )
 
 set(config_extra_libs
-    ${CMAKE_SOURCE_DIR}/src/lib/mathlib/CMSIS/libarm_cortexM4lf_math.a
     ${APM_PROGRAM_LIB}
 )
 

@@ -24,7 +24,7 @@
 
 using namespace SITL;
 
-static const Motor quad_plus_motors[] =
+static Motor quad_plus_motors[] =
 {
     Motor(AP_MOTORS_MOT_1,  90, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2),
     Motor(AP_MOTORS_MOT_2, -90, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 4),
@@ -32,7 +32,7 @@ static const Motor quad_plus_motors[] =
     Motor(AP_MOTORS_MOT_4, 180, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  3),
 };
 
-static const Motor quad_x_motors[] =
+static Motor quad_x_motors[] =
 {
     Motor(AP_MOTORS_MOT_1,   45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 1),
     Motor(AP_MOTORS_MOT_2, -135, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 3),
@@ -40,7 +40,7 @@ static const Motor quad_x_motors[] =
     Motor(AP_MOTORS_MOT_4,  135, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  2),
 };
 
-static const Motor hexa_motors[] =
+static Motor hexa_motors[] =
 {
     Motor(AP_MOTORS_MOT_1,   0, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  1),
     Motor(AP_MOTORS_MOT_2, 180, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 4),
@@ -50,7 +50,7 @@ static const Motor hexa_motors[] =
     Motor(AP_MOTORS_MOT_6, 120, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  3)
 };
 
-static const Motor hexax_motors[] =
+static Motor hexax_motors[] =
 {
     Motor(AP_MOTORS_MOT_1,  90, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  2),
     Motor(AP_MOTORS_MOT_2, -90, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 5),
@@ -60,7 +60,7 @@ static const Motor hexax_motors[] =
     Motor(AP_MOTORS_MOT_6,-150, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  4)
 };
 
-static const Motor octa_motors[] =
+static Motor octa_motors[] =
 {
     Motor(AP_MOTORS_MOT_1,    0,  AP_MOTORS_MATRIX_YAW_FACTOR_CW,  1),
     Motor(AP_MOTORS_MOT_2,  180,  AP_MOTORS_MATRIX_YAW_FACTOR_CW,  5),
@@ -72,7 +72,7 @@ static const Motor octa_motors[] =
     Motor(AP_MOTORS_MOT_8,   90,  AP_MOTORS_MATRIX_YAW_FACTOR_CW,  3)
 };
 
-static const Motor octa_quad_motors[] =
+static Motor octa_quad_motors[] =
 {
     Motor(AP_MOTORS_MOT_1,   45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 1),
     Motor(AP_MOTORS_MOT_2,  -45, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  7),
@@ -84,38 +84,46 @@ static const Motor octa_quad_motors[] =
     Motor(AP_MOTORS_MOT_8, -135, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  6)
 };
 
-static const Motor tri_motors[] =
+static Motor tri_motors[] =
 {
-    Motor(AP_MOTORS_MOT_1,   45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 1),
-    Motor(AP_MOTORS_MOT_2,  -45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 3),
-    Motor(AP_MOTORS_MOT_4,  180, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2, AP_MOTORS_MOT_7, -45, 45, -1, 0, 0),
+    Motor(AP_MOTORS_MOT_1,   60, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 1),
+    Motor(AP_MOTORS_MOT_2,  -60, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 3),
+    Motor(AP_MOTORS_MOT_4,  180, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2, AP_MOTORS_MOT_7, 60, -60, -1, 0, 0),
 };
 
-static const Motor y6_motors[] =
+static Motor tilttri_motors[] =
 {
-    Motor(AP_MOTORS_MOT_1,  45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2),
-    Motor(AP_MOTORS_MOT_2, -45, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  5),
-    Motor(AP_MOTORS_MOT_3, -45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 6),
+    Motor(AP_MOTORS_MOT_1,   60, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 1, -1, 0, 0, AP_MOTORS_MOT_8, 0, -90),
+    Motor(AP_MOTORS_MOT_2,  -60, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  3, -1, 0, 0, AP_MOTORS_MOT_8, 0, -90),
+    Motor(AP_MOTORS_MOT_4,  180, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2, AP_MOTORS_MOT_7, 60, -60, -1, 0, 0),
+};
+
+static Motor y6_motors[] =
+{
+    Motor(AP_MOTORS_MOT_1,  60, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2),
+    Motor(AP_MOTORS_MOT_2, -60, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  5),
+    Motor(AP_MOTORS_MOT_3, -60, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 6),
     Motor(AP_MOTORS_MOT_4, 180, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  4),
-    Motor(AP_MOTORS_MOT_5,  45, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  1),
+    Motor(AP_MOTORS_MOT_5,  60, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  1),
     Motor(AP_MOTORS_MOT_6, 180, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 3)
 };
 
 /*
-  FireflyY6 is a Y6 with front motors tiltable using servo on channel 7
+  FireflyY6 is a Y6 with front motors tiltable using servo on channel 9 (output 8)
  */
-static const Motor firefly_motors[] =
+static Motor firefly_motors[] =
 {
-    Motor(AP_MOTORS_MOT_1,  45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2, -1, 0, 0, AP_MOTORS_MOT_7, 0, -90),
-    Motor(AP_MOTORS_MOT_2, -45, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  5, -1, 0, 0, AP_MOTORS_MOT_7, 0, -90),
-    Motor(AP_MOTORS_MOT_3, -45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 6, -1, 0, 0, AP_MOTORS_MOT_7, 0, -90),
+    Motor(AP_MOTORS_MOT_1,  60, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2, -1, 0, 0, 8, 0, -90),
+    Motor(AP_MOTORS_MOT_2, -60, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  5, -1, 0, 0, 8, 0, -90),
+    Motor(AP_MOTORS_MOT_3, -60, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 6, -1, 0, 0, 8, 0, -90),
     Motor(AP_MOTORS_MOT_4, 180, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  4),
-    Motor(AP_MOTORS_MOT_5,  45, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  1, -1, 0, 0, AP_MOTORS_MOT_7, 0, -90),
+    Motor(AP_MOTORS_MOT_5,  60, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  1, -1, 0, 0, 8, 0, -90),
     Motor(AP_MOTORS_MOT_6, 180, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 3)
 };
 
 /*
-  table of supported frame types
+  table of supported frame types. String order is important for
+  partial name matching
  */
 static Frame supported_frames[] =
 {
@@ -123,11 +131,12 @@ static Frame supported_frames[] =
     Frame("quad",      4, quad_plus_motors),
     Frame("copter",    4, quad_plus_motors),
     Frame("x",         4, quad_x_motors),
-    Frame("hexa",      6, hexa_motors),
     Frame("hexax",     6, hexax_motors),
-    Frame("octa",      8, octa_motors),
+    Frame("hexa",      6, hexa_motors),
     Frame("octa-quad", 8, octa_quad_motors),
+    Frame("octa",      8, octa_motors),
     Frame("tri",       3, tri_motors),
+    Frame("tilttri",   3, tilttri_motors),
     Frame("y6",        6, y6_motors),
     Frame("firefly",   6, firefly_motors)
 };
@@ -152,7 +161,8 @@ void Frame::init(float _mass, float hover_throttle, float _terminal_velocity, fl
 Frame *Frame::find_frame(const char *name)
 {
     for (uint8_t i=0; i < ARRAY_SIZE(supported_frames); i++) {
-        if (strcasecmp(name, supported_frames[i].name) == 0) {
+        // do partial name matching to allow for frame variants
+        if (strncasecmp(name, supported_frames[i].name, strlen(supported_frames[i].name)) == 0) {
             return &supported_frames[i];
         }
     }

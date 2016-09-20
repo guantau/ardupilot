@@ -10,7 +10,7 @@ public:
     /**
      * Call init from the platform hal instance init, so that both the type of
      * the RCInput implementation and init argument (e.g. ISRRegistry) are
-     * known to the programmer. (Its too difficult to describe this dependency
+     * known to the programmer. (It's too difficult to describe this dependency
      * in the C++ type system.)
      */
     virtual void init() = 0;
@@ -48,9 +48,9 @@ public:
     virtual bool set_overrides(int16_t *overrides, uint8_t len) = 0;
     /* set_override: set just a specific channel */
     virtual bool set_override(uint8_t channel, int16_t override) = 0;
-    /* clear_overrides: equivelant to setting all overrides to 0 */
+    /* clear_overrides: equivalent to setting all overrides to 0 */
     virtual void clear_overrides() = 0;
 
     /* execute receiver bind */
-    virtual bool rc_bind(int dsmMode) { return false; };
+    virtual bool rc_bind(int dsmMode) { return false; }
 };

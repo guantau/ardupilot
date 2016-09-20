@@ -18,7 +18,10 @@
 #include <AP_Notify/AP_Notify.h>
 #include <GCS_MAVLink/GCS.h>
 
+#ifndef AP_ARMING_COMPASS_OFFSETS_MAX
+// this can also be overridden for specific boards in the HAL
 #define AP_ARMING_COMPASS_OFFSETS_MAX   600
+#endif
 #define AP_ARMING_COMPASS_MAGFIELD_MIN  185     // 0.35 * 530 milligauss
 #define AP_ARMING_COMPASS_MAGFIELD_MAX  875     // 1.65 * 530 milligauss
 #define AP_ARMING_BOARD_VOLTAGE_MIN     4.3f
@@ -210,6 +213,10 @@ bool AP_Arming::ins_checks(bool report)
                      */
                     threshold *= 3;
                 }
+
+                // EKF is less sensitive to Z-axis error
+                vec_diff.z *= 0.5f;
+
                 if (vec_diff.length() <= threshold) {
                     last_accel_pass_ms[i] = AP_HAL::millis();
                 }
@@ -232,7 +239,7 @@ bool AP_Arming::ins_checks(bool report)
                 // get next gyro vector
                 const Vector3f &gyro_vec = ins.get_gyro(i);
                 Vector3f vec_diff = gyro_vec - prime_gyro_vec;
-                // allow for up to 5 degrees/s difference. Pass if its
+                // allow for up to 5 degrees/s difference. Pass if it has
                 // been OK in last 10 seconds
                 if (vec_diff.length() <= radians(5)) {
                     last_gyro_pass_ms[i] = AP_HAL::millis();
@@ -335,6 +342,7 @@ bool AP_Arming::gps_checks(bool report)
         }
     }
 
+#if CONFIG_HAL_BOARD != HAL_BOARD_SITL
     if ((checks_to_perform & ARMING_CHECK_ALL) || (checks_to_perform & ARMING_CHECK_GPS_CONFIG)) {
         uint8_t first_unconfigured = gps.first_unconfigured_gps();
         if (first_unconfigured != AP_GPS::GPS_ALL_CONFIGURED) {
@@ -344,11 +352,10 @@ bool AP_Arming::gps_checks(bool report)
                                                   first_unconfigured + 1);
                 gps.broadcast_first_configuration_failure_reason();
             }
-#if CONFIG_HAL_BOARD != HAL_BOARD_SITL
             return false;
-#endif
         }
     }
+#endif
     return true;
 }
 
@@ -364,7 +371,7 @@ bool AP_Arming::battery_checks(bool report)
             return false;
         }
 
-        for (int i = 0; i < AP_BATT_MONITOR_MAX_INSTANCES; i++) {
+        for (int i = 0; i < _battery.num_instances(); i++) {
             if ((_min_voltage[i] > 0.0f) && (_battery.voltage(i) < _min_voltage[i])) {
                 if (report) {
                     GCS_MAVLINK::send_statustext_all(MAV_SEVERITY_CRITICAL, "PreArm: Battery %d voltage %.1f below minimum %.1f",
@@ -454,7 +461,7 @@ bool AP_Arming::pre_arm_checks(bool report)
     return ret;
 }
 
-//returns true if arming occured successfully
+//returns true if arming occurred successfully
 bool AP_Arming::arm(uint8_t method)
 {
     if (armed) { //already armed

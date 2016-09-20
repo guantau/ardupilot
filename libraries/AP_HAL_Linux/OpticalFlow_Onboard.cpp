@@ -19,14 +19,14 @@
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BBBMINI
 #include "OpticalFlow_Onboard.h"
 
-#include <vector>
-#include <stdio.h>
-#include <pthread.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <linux/v4l2-mediabus.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <vector>
 
 #include "CameraSensor_Mt9v117.h"
 #include "GPIO.h"
@@ -80,7 +80,8 @@ void OpticalFlow_Onboard::init(AP_HAL::OpticalFlow::Gyro_Cb get_gyro)
     _pwm->enable(true);
 
     _camerasensor = new CameraSensor_Mt9v117(HAL_OPTFLOW_ONBOARD_SUBDEV_PATH,
-                                             hal.i2c, 0x5D, MT9V117_QVGA,
+                                             hal.i2c_mgr->get_device(0, 0x5D),
+                                             MT9V117_QVGA,
                                              BEBOP_GPIO_CAMV_NRST,
                                              BEBOP_CAMV_PWM_FREQ);
     if (!_camerasensor->set_format(HAL_OPTFLOW_ONBOARD_SENSOR_WIDTH,

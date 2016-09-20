@@ -23,6 +23,7 @@
 #include "AP_AHRS.h"
 #include <AP_Vehicle/AP_Vehicle.h>
 #include <GCS_MAVLink/GCS.h>
+#include <AP_Module/AP_Module.h>
 
 #if AP_AHRS_NAVEKF_AVAILABLE
 
@@ -91,6 +92,9 @@ void AP_AHRS_NavEKF::update(void)
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     update_SITL();
 #endif
+
+    // call AHRS_update hook if any
+    AP_Module::call_hook_AHRS_update(*this);
 }
 
 void AP_AHRS_NavEKF::update_DCM(void)
@@ -118,8 +122,11 @@ void AP_AHRS_NavEKF::update_EKF1(void)
             start_time_ms = AP_HAL::millis();
         }
         // slight extra delay on EKF1 to prioritise EKF2 for memory
-        if (AP_HAL::millis() - start_time_ms > startup_delay_ms + 100U) {
+        if (AP_HAL::millis() - start_time_ms > startup_delay_ms + 100U || force_ekf) {
             ekf1_started = EKF1.InitialiseFilterDynamic();
+            if (force_ekf) {
+                return;
+            }
         }
     }
     if (ekf1_started) {
@@ -143,7 +150,7 @@ void AP_AHRS_NavEKF::update_EKF1(void)
             _gyro_estimate.zero();
             uint8_t healthy_count = 0;
             for (uint8_t i=0; i<_ins.get_gyro_count(); i++) {
-                if (_ins.get_gyro_health(i) && healthy_count < 2) {
+                if (_ins.get_gyro_health(i) && healthy_count < 2 && _ins.use_gyro(i)) {
                     _gyro_estimate += _ins.get_gyro(i);
                     healthy_count++;
                 }
@@ -189,8 +196,11 @@ void AP_AHRS_NavEKF::update_EKF2(void)
         if (start_time_ms == 0) {
             start_time_ms = AP_HAL::millis();
         }
-        if (AP_HAL::millis() - start_time_ms > startup_delay_ms) {
+        if (AP_HAL::millis() - start_time_ms > startup_delay_ms || force_ekf) {
             ekf2_started = EKF2.InitialiseFilter();
+            if (force_ekf) {
+                return;
+            }
         }
     }
     if (ekf2_started) {
@@ -207,39 +217,37 @@ void AP_AHRS_NavEKF::update_EKF2(void)
             update_trig();
 
             // keep _gyro_bias for get_gyro_drift()
+            _gyro_bias.zero();            
             EKF2.getGyroBias(-1,_gyro_bias);
             _gyro_bias = -_gyro_bias;
 
             // calculate corrected gryo estimate for get_gyro()
             _gyro_estimate.zero();
-            uint8_t healthy_count = 0;
-            for (uint8_t i=0; i<_ins.get_gyro_count(); i++) {
-                if (_ins.get_gyro_health(i) && healthy_count < 2) {
-                    _gyro_estimate += _ins.get_gyro(i);
-                    healthy_count++;
-                }
-            }
-            if (healthy_count > 1) {
-                _gyro_estimate /= healthy_count;
+
+            // the gyro bias applies only to the IMU associated with the primary EKF2
+            // core
+            int8_t primary_imu = EKF2.getPrimaryCoreIMUIndex();
+            if (primary_imu == -1) {
+                _gyro_estimate = _ins.get_gyro();
+            } else {
+                _gyro_estimate = _ins.get_gyro(primary_imu);
             }
             _gyro_estimate += _gyro_bias;
 
-            float abias;
+            float abias = 0;
             EKF2.getAccelZBias(-1,abias);
 
-            // This EKF uses the primary IMU
-            // Eventually we will run a separate instance of the EKF for each IMU and do the selection and blending of EKF outputs upstream
-            // update _accel_ef_ekf
+            // This EKF is currently using primary_imu, and abias applies to only that IMU
             for (uint8_t i=0; i<_ins.get_accel_count(); i++) {
                 Vector3f accel = _ins.get_accel(i);
-                if (i==_ins.get_primary_accel()) {
+                if (i == primary_imu) {
                     accel.z -= abias;
                 }
                 if (_ins.get_accel_health(i)) {
                     _accel_ef_ekf[i] = _dcm_matrix * accel;
                 }
             }
-            _accel_ef_ekf_blended = _accel_ef_ekf[_ins.get_primary_accel()];
+            _accel_ef_ekf_blended = _accel_ef_ekf[primary_imu>=0?primary_imu:_ins.get_primary_accel()];
         }
     }
 }
@@ -333,7 +341,7 @@ bool AP_AHRS_NavEKF::get_position(struct Location &loc) const
     switch (active_EKF_type()) {
 #if AP_AHRS_WITH_EKF1
     case EKF_TYPE1:
-        if (EKF1.getLLH(loc) && EKF1.getPosNED(ned_pos) && EKF1.getOriginLLH(origin)) {
+        if (EKF1.getLLH(loc) && EKF1.getPosD(ned_pos.z) && EKF1.getOriginLLH(origin)) {
             // fixup altitude using relative position from EKF origin
             loc.alt = origin.alt - ned_pos.z*100;
             return true;
@@ -341,7 +349,7 @@ bool AP_AHRS_NavEKF::get_position(struct Location &loc) const
         break;
 #endif
     case EKF_TYPE2:
-        if (EKF2.getLLH(loc) && EKF2.getPosNED(-1,ned_pos) && EKF2.getOriginLLH(origin)) {
+        if (EKF2.getLLH(loc) && EKF2.getPosD(-1,ned_pos.z) && EKF2.getOriginLLH(origin)) {
             // fixup altitude using relative position from EKF origin
             loc.alt = origin.alt - ned_pos.z*100;
             return true;
@@ -667,13 +675,33 @@ bool AP_AHRS_NavEKF::get_relative_position_NED(Vector3f &vec) const
         return false;
 
 #if AP_AHRS_WITH_EKF1
-    case EKF_TYPE1:
-        return EKF1.getPosNED(vec);
+    case EKF_TYPE1: {
+        Vector2f posNE;
+        float posD;
+        if (EKF1.getPosNE(posNE) && EKF1.getPosD(posD)) {
+            // position is valid
+            vec.x = posNE.x;
+            vec.y = posNE.y;
+            vec.z = posD;
+            return true;
+        }
+        return false;
+    }
 #endif
 
     case EKF_TYPE2:
-    default:
-        return EKF2.getPosNED(-1,vec);
+    default: {
+        Vector2f posNE;
+        float posD;
+        if (EKF2.getPosNE(-1,posNE) && EKF2.getPosD(-1,posD)) {
+            // position is valid
+            vec.x = posNE.x;
+            vec.y = posNE.y;
+            vec.z = posD;
+            return true;
+        }
+        return false;
+    }
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     case EKF_TYPE_SITL: {
@@ -683,6 +711,69 @@ bool AP_AHRS_NavEKF::get_relative_position_NED(Vector3f &vec) const
         const struct SITL::sitl_fdm &fdm = _sitl->state;
         vec = Vector3f(diff2d.x, diff2d.y,
                        -(fdm.altitude - get_home().alt*0.01f));
+        return true;
+    }
+#endif
+    }
+}
+
+// write a relative ground position estimate in meters, North/East order
+// return true if estimate is valid
+bool AP_AHRS_NavEKF::get_relative_position_NE(Vector2f &posNE) const
+{
+    switch (active_EKF_type()) {
+    case EKF_TYPE_NONE:
+        return false;
+
+#if AP_AHRS_WITH_EKF1
+    case EKF_TYPE1: {
+        bool position_is_valid = EKF1.getPosNE(posNE);
+        return position_is_valid;
+    }
+#endif
+
+    case EKF_TYPE2:
+    default: {
+        bool position_is_valid = EKF2.getPosNE(-1,posNE);
+        return position_is_valid;
+    }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+    case EKF_TYPE_SITL: {
+        Location loc;
+        get_position(loc);
+        posNE = location_diff(get_home(), loc);
+        return true;
+    }
+#endif
+    }
+}
+
+// write a relative ground position in meters, Down
+// return true if the estimate is valid
+bool AP_AHRS_NavEKF::get_relative_position_D(float &posD) const
+{
+    switch (active_EKF_type()) {
+    case EKF_TYPE_NONE:
+        return false;
+
+#if AP_AHRS_WITH_EKF1
+    case EKF_TYPE1: {
+        bool position_is_valid = EKF1.getPosD(posD);
+        return position_is_valid;
+    }
+#endif
+
+    case EKF_TYPE2:
+    default: {
+        bool position_is_valid = EKF2.getPosD(-1,posD);
+        return position_is_valid;
+    }
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+    case EKF_TYPE_SITL: {
+        const struct SITL::sitl_fdm &fdm = _sitl->state;
+        posD = -(fdm.altitude - get_home().alt*0.01f);
         return true;
     }
 #endif
@@ -733,7 +824,7 @@ AP_AHRS_NavEKF::EKF_TYPE AP_AHRS_NavEKF::active_EKF_type(void) const
             return EKF_TYPE_NONE;
         }
         if (always_use_EKF()) {
-            uint8_t ekf_faults;
+            uint16_t ekf_faults;
             EKF1.getFilterFaults(ekf_faults);
             if (ekf_faults == 0) {
                 ret = EKF_TYPE1;
@@ -751,7 +842,7 @@ AP_AHRS_NavEKF::EKF_TYPE AP_AHRS_NavEKF::active_EKF_type(void) const
             return EKF_TYPE_NONE;
         }
         if (always_use_EKF()) {
-            uint8_t ekf2_faults;
+            uint16_t ekf2_faults;
             EKF2.getFilterFaults(-1,ekf2_faults);
             if (ekf2_faults == 0) {
                 ret = EKF_TYPE2;
@@ -772,12 +863,15 @@ AP_AHRS_NavEKF::EKF_TYPE AP_AHRS_NavEKF::active_EKF_type(void) const
     /*
       fixed wing and rover when in fly_forward mode will fall back to
       DCM if the EKF doesn't have GPS. This is the safest option as
-      DCM is very robust
+      DCM is very robust. Note that we also check the filter status
+      when fly_forward is false and we are disarmed. This is to ensure
+      that the arming checks do wait for good GPS position on fixed
+      wing and rover
      */
     if (ret != EKF_TYPE_NONE &&
         (_vehicle_class == AHRS_VEHICLE_FIXED_WING ||
          _vehicle_class == AHRS_VEHICLE_GROUND) &&
-        _flags.fly_forward) {
+        (_flags.fly_forward || !hal.util->get_soft_armed())) {
         nav_filter_status filt_state;
         if (ret == EKF_TYPE2) {
             EKF2.getFilterStatus(-1,filt_state);
@@ -801,10 +895,26 @@ AP_AHRS_NavEKF::EKF_TYPE AP_AHRS_NavEKF::active_EKF_type(void) const
             return EKF_TYPE_NONE;
         }
         if (!filt_state.flags.attitude ||
-                !filt_state.flags.horiz_vel ||
-                !filt_state.flags.vert_vel ||
-                !filt_state.flags.horiz_pos_abs ||
-                !filt_state.flags.vert_pos) {
+            !filt_state.flags.vert_vel ||
+            !filt_state.flags.vert_pos) {
+            return EKF_TYPE_NONE;
+        }
+        if (!filt_state.flags.horiz_vel ||
+            !filt_state.flags.horiz_pos_abs) {
+            if ((!_compass || !_compass->use_for_yaw()) &&
+                _gps.status() >= AP_GPS::GPS_OK_FIX_3D &&
+                _gps.ground_speed() < 2) {
+                /*
+                  special handling for non-compass mode when sitting
+                  still. The EKF may not yet have aligned its yaw. We
+                  accept EKF as healthy to allow arming. Once we reach
+                  speed the EKF should get yaw alignment
+                */
+                if (filt_state.flags.pred_horiz_pos_abs &&
+                    filt_state.flags.pred_horiz_pos_rel) {
+                    return ret;
+                }
+            }
             return EKF_TYPE_NONE;
         }
     }
@@ -935,7 +1045,7 @@ void  AP_AHRS_NavEKF::writeOptFlowMeas(uint8_t &rawFlowQuality, Vector2f &rawFlo
     EKF2.writeOptFlowMeas(rawFlowQuality, rawFlowRates, rawGyroRates, msecFlowMeas);
 }
 
-// inhibit GPS useage
+// inhibit GPS usage
 uint8_t AP_AHRS_NavEKF::setInhibitGPS(void)
 {
     switch (ekf_type()) {
@@ -1095,6 +1205,13 @@ void AP_AHRS_NavEKF::send_ekf_status_report(mavlink_channel_t chan)
         return EKF1.send_status_report(chan);
 #endif
 
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+    case EKF_TYPE_SITL:
+        // send zero status report
+        mavlink_msg_ekf_status_report_send(chan, 0, 0, 0, 0, 0, 0);
+        break;
+#endif
+        
     case EKF_TYPE2:
     default:
         return EKF2.send_status_report(chan);
@@ -1265,6 +1382,61 @@ bool AP_AHRS_NavEKF::getGpsGlitchStatus()
     return ekf_status.flags.gps_glitching;
 }
 
+
+// is the EKF backend doing its own sensor logging?
+bool AP_AHRS_NavEKF::have_ekf_logging(void) const
+{
+    switch (ekf_type()) {
+    case 2:
+        return EKF2.have_ekf_logging();
+    default:
+        break;
+    }
+    return false;
+}
+
+// get earth-frame accel vector for primary IMU
+uint8_t AP_AHRS_NavEKF::get_primary_IMU_index() const
+{
+    int8_t imu = -1;
+    switch (ekf_type()) {
+    case 2:
+        // let EKF2 choose primary IMU
+        imu = EKF2.getPrimaryCoreIMUIndex();
+        break;
+    default:
+        break;
+    }
+    if (imu == -1) {
+        imu = _ins.get_primary_accel();
+    }
+    return imu;
+}
+
+// get earth-frame accel vector for primary IMU
+const Vector3f &AP_AHRS_NavEKF::get_accel_ef() const
+{
+    return get_accel_ef(get_primary_accel_index());
+}
+
+
+// get the index of the current primary accelerometer sensor
+uint8_t AP_AHRS_NavEKF::get_primary_accel_index(void) const
+{
+    if (ekf_type() == 2) {
+        return get_primary_IMU_index();
+    }
+    return _ins.get_primary_accel();
+}
+
+// get the index of the current primary gyro sensor
+uint8_t AP_AHRS_NavEKF::get_primary_gyro_index(void) const
+{
+    if (ekf_type() == 2) {
+        return get_primary_IMU_index();
+    }
+    return _ins.get_primary_gyro();
+}
 
 #endif // AP_AHRS_NAVEKF_AVAILABLE
 

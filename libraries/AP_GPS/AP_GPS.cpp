@@ -21,6 +21,7 @@
 #include <AP_Notify/AP_Notify.h>
 #include <GCS_MAVLink/GCS.h>
 
+#include "AP_GPS_NOVA.h"
 #include "AP_GPS_ERB.h"
 #include "AP_GPS_GSOF.h"
 #include "AP_GPS_MTK.h"
@@ -32,6 +33,7 @@
 #include "AP_GPS_SBP.h"
 #include "AP_GPS_SIRF.h"
 #include "AP_GPS_UBLOX.h"
+#include "AP_GPS_MAV.h"
 #include "GPS_Backend.h"
 
 extern const AP_HAL::HAL &hal;
@@ -41,7 +43,7 @@ const AP_Param::GroupInfo AP_GPS::var_info[] = {
     // @Param: TYPE
     // @DisplayName: GPS type
     // @Description: GPS type
-    // @Values: 0:None,1:AUTO,2:uBlox,3:MTK,4:MTK19,5:NMEA,6:SiRF,7:HIL,8:SwiftNav,9:PX4-UAVCAN,10:SBF,11:GSOF
+    // @Values: 0:None,1:AUTO,2:uBlox,3:MTK,4:MTK19,5:NMEA,6:SiRF,7:HIL,8:SwiftNav,9:PX4-UAVCAN,10:SBF,11:GSOF,12:QURT,13:ERB,14:MAV,15:NOVA
     // @RebootRequired: True
     AP_GROUPINFO("TYPE",    0, AP_GPS, _type[0], 1),
 
@@ -154,7 +156,7 @@ void AP_GPS::init(DataFlash_Class *dataflash, const AP_SerialManager& serial_man
 }
 
 // baudrates to try to detect GPSes with
-const uint32_t AP_GPS::_baudrates[] = {4800U, 38400U, 115200U, 57600U, 9600U, 230400U};
+const uint32_t AP_GPS::_baudrates[] = {4800U, 19200U, 38400U, 115200U, 57600U, 9600U, 230400U};
 
 // initialisation blobs to send to the GPS to try to get it into the
 // right mode
@@ -243,6 +245,9 @@ AP_GPS::detect_instance(uint8_t instance)
 	} else if ((_type[instance] == GPS_TYPE_GSOF)) {
 		_broadcast_gps_type("GSOF", instance, -1); // baud rate isn't valid
 		new_gps = new AP_GPS_GSOF(*this, state[instance], _port[instance]);
+	} else if ((_type[instance] == GPS_TYPE_NOVA)) {
+		_broadcast_gps_type("NOVA", instance, -1); // baud rate isn't valid
+		new_gps = new AP_GPS_NOVA(*this, state[instance], _port[instance]);
 	}
 
     // record the time when we started detection. This is used to try
@@ -253,11 +258,11 @@ AP_GPS::detect_instance(uint8_t instance)
 
     if (now - dstate->last_baud_change_ms > GPS_BAUD_TIME_MS) {
         // try the next baud rate
-		dstate->last_baud++;
 		if (dstate->last_baud == ARRAY_SIZE(_baudrates)) {
 			dstate->last_baud = 0;
 		}
 		uint32_t baudrate = _baudrates[dstate->last_baud];
+		dstate->last_baud++;
 		_port[instance]->begin(baudrate);
 		_port[instance]->set_flow_control(AP_HAL::UARTDriver::FLOW_CONTROL_DISABLE);
 		dstate->last_baud_change_ms = now;
@@ -266,10 +271,14 @@ AP_GPS::detect_instance(uint8_t instance)
         send_blob_start(instance, _initialisation_raw_blob, sizeof(_initialisation_raw_blob));
     else
 #endif
-        send_blob_start(instance, _initialisation_blob, sizeof(_initialisation_blob));
+        if(_auto_config == 1){
+            send_blob_start(instance, _initialisation_blob, sizeof(_initialisation_blob));
+        }
     }
 
-    send_blob_update(instance);
+    if(_auto_config == 1){
+        send_blob_update(instance);
+    }
 
     while (initblob_state[instance].remaining == 0 && _port[instance]->available() > 0
             && new_gps == NULL) {
@@ -312,6 +321,12 @@ AP_GPS::detect_instance(uint8_t instance)
                  AP_GPS_ERB::_detect(dstate->erb_detect_state, data)) {
             _broadcast_gps_type("ERB", instance, dstate->last_baud);
             new_gps = new AP_GPS_ERB(*this, state[instance], _port[instance]);
+        }
+        // user has to explicitly set the MAV type, do not use AUTO
+        // Do not try to detect the MAV type, assume it's there
+        else if (_type[instance] == GPS_TYPE_MAV) {
+            _broadcast_gps_type("MAV", instance, dstate->last_baud);
+            new_gps = new AP_GPS_MAV(*this, state[instance], NULL);
         }
 		else if (now - dstate->detect_started_ms > (ARRAY_SIZE(_baudrates) * GPS_BAUD_TIME_MS)) {
 			// prevent false detection of NMEA mode in
@@ -379,7 +394,9 @@ AP_GPS::update_instance(uint8_t instance)
         return;
     }
 
-    send_blob_update(instance);
+    if(_auto_config == 1){
+        send_blob_update(instance);
+    }
 
     // we have an active driver for this instance
     bool result = drivers[instance]->read();
@@ -462,12 +479,26 @@ AP_GPS::update(void)
 }
 
 /*
+  pass along a mavlink message (for MAV type)
+ */
+void
+AP_GPS::handle_msg(mavlink_message_t *msg)
+{
+    uint8_t i;
+    for (i=0; i<num_instances; i++) {
+        if ((drivers[i] != NULL) && (_type[i] != GPS_TYPE_NONE)) {
+            drivers[i]->handle_msg(msg);
+        }
+    }
+}
+
+/*
   set HIL (hardware in the loop) status for a GPS instance
  */
 void 
 AP_GPS::setHIL(uint8_t instance, GPS_Status _status, uint64_t time_epoch_ms, 
                const Location &_location, const Vector3f &_velocity, uint8_t _num_sats, 
-               uint16_t hdop, bool _have_vertical_velocity)
+               uint16_t hdop)
 {
     if (instance >= GPS_MAX_INSTANCES) {
         return;
@@ -478,11 +509,10 @@ AP_GPS::setHIL(uint8_t instance, GPS_Status _status, uint64_t time_epoch_ms,
     istate.location = _location;
     istate.location.options = 0;
     istate.velocity = _velocity;
-    istate.ground_speed = pythagorous2(istate.velocity.x, istate.velocity.y);
-    istate.ground_course_cd = wrap_360_cd(degrees(atan2f(istate.velocity.y, istate.velocity.x)) * 100UL);
+    istate.ground_speed = norm(istate.velocity.x, istate.velocity.y);
+    istate.ground_course = wrap_360(degrees(atan2f(istate.velocity.y, istate.velocity.x)));
     istate.hdop = hdop;
     istate.num_sats = _num_sats;
-    istate.have_vertical_velocity |= _have_vertical_velocity;
     istate.last_gps_time_ms = tnow;
     uint64_t gps_time_ms = time_epoch_ms - (17000ULL*86400ULL + 52*10*7000ULL*86400ULL - 15000ULL);
     istate.time_week     = gps_time_ms / (86400*7*(uint64_t)1000);
@@ -490,6 +520,24 @@ AP_GPS::setHIL(uint8_t instance, GPS_Status _status, uint64_t time_epoch_ms,
     timing[instance].last_message_time_ms = tnow;
     timing[instance].last_fix_time_ms = tnow;
     _type[instance].set(GPS_TYPE_HIL);
+}
+
+// set accuracy for HIL
+void AP_GPS::setHIL_Accuracy(uint8_t instance, float vdop, float hacc, float vacc, float sacc, bool _have_vertical_velocity, uint32_t sample_ms)
+{
+    GPS_State &istate = state[instance];
+    istate.vdop = vdop * 100;
+    istate.horizontal_accuracy = hacc;
+    istate.vertical_accuracy = vacc;
+    istate.speed_accuracy = sacc;
+    istate.have_horizontal_accuracy = true;
+    istate.have_vertical_accuracy = true;
+    istate.have_speed_accuracy = true;
+    istate.have_vertical_velocity |= _have_vertical_velocity;
+    if (sample_ms != 0) {
+        timing[instance].last_message_time_ms = sample_ms;
+        timing[instance].last_fix_time_ms = sample_ms;
+    }
 }
 
 /**
@@ -561,7 +609,7 @@ AP_GPS::send_mavlink_gps_raw(mavlink_channel_t chan)
         get_hdop(0),
         get_vdop(0),
         ground_speed(0)*100,  // cm/s
-        ground_course_cd(0), // 1/100 degrees,
+        ground_course(0)*100, // 1/100 degrees,
         num_sats(0));
 }
 
@@ -589,7 +637,7 @@ AP_GPS::send_mavlink_gps2_raw(mavlink_channel_t chan)
         get_hdop(1),
         get_vdop(1),
         ground_speed(1)*100,  // cm/s
-        ground_course_cd(1), // 1/100 degrees,
+        ground_course(1)*100, // 1/100 degrees,
         num_sats(1),
         0,
         0);

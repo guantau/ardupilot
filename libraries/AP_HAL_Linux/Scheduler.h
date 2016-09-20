@@ -10,7 +10,13 @@
 #define LINUX_SCHEDULER_MAX_TIMESLICED_PROCS 10
 #define LINUX_SCHEDULER_MAX_IO_PROCS 10
 
-class Linux::Scheduler : public AP_HAL::Scheduler {
+#define AP_LINUX_SENSORS_STACK_SIZE  256 * 1024
+#define AP_LINUX_SENSORS_SCHED_POLICY  SCHED_FIFO
+#define AP_LINUX_SENSORS_SCHED_PRIO 12
+
+namespace Linux {
+
+class Scheduler : public AP_HAL::Scheduler {
 public:
     Scheduler();
 
@@ -60,6 +66,8 @@ private:
 
     void _wait_all_threads();
 
+    void     _debug_stack();
+
     AP_HAL::Proc _delay_cb;
     uint16_t _min_delay_cb_ms;
 
@@ -102,7 +110,10 @@ private:
     bool _register_timesliced_proc(AP_HAL::MemberProc, uint8_t);
 
     uint64_t _stopped_clock_usec;
+    uint64_t _last_stack_debug_msec;
 
     Semaphore _timer_semaphore;
     Semaphore _io_semaphore;
 };
+
+}

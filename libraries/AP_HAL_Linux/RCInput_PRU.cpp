@@ -3,22 +3,23 @@
 #if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PXF || \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ERLEBOARD || \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BBBMINI
+#include "RCInput_PRU.h"
 
-#include <stdio.h>
-#include <sys/time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <stdint.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #include "GPIO.h"
-#include "RCInput.h"
+
+#define RCIN_PRUSS_SHAREDRAM_BASE   0x4a312000
 
 extern const AP_HAL::HAL& hal;
 

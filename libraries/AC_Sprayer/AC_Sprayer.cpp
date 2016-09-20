@@ -13,7 +13,7 @@ const AP_Param::GroupInfo AC_Sprayer::var_info[] = {
     // @Description: Allows you to enable (1) or disable (0) the sprayer
     // @Values: 0:Disabled,1:Enabled
     // @User: Standard
-    AP_GROUPINFO("ENABLE",      0,  AC_Sprayer, _enabled, 0),
+    AP_GROUPINFO_FLAGS("ENABLE", 0, AC_Sprayer, _enabled, 0, AP_PARAM_FLAG_ENABLE),
 
     // @Param: PUMP_RATE
     // @DisplayName: Pump speed
@@ -113,7 +113,7 @@ AC_Sprayer::update()
 
     // get horizontal velocity
     const Vector3f &velocity = _inav->get_velocity();
-    ground_speed = pythagorous2(velocity.x,velocity.y);
+    ground_speed = norm(velocity.x,velocity.y);
 
     // get the current time
     now = AP_HAL::millis();

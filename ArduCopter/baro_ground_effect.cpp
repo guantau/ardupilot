@@ -1,10 +1,10 @@
 /// -*- tab-width: 4; Mode: C++; c-basic-offset: 4; indent-tabs-mode: nil -*-
 
 #include "Copter.h"
-#if GNDEFFECT_COMPENSATION == ENABLED
+
 void Copter::update_ground_effect_detector(void)
 {
-    if(!motors.armed()) {
+    if(!g2.gndeffect_comp_enabled || !motors.armed()) {
         // disarmed - disable ground effect and return
         gndeffect_state.takeoff_expected = false;
         gndeffect_state.touchdown_expected = false;
@@ -39,7 +39,7 @@ void Copter::update_ground_effect_detector(void)
     }
 
     // if we aren't taking off yet, reset the takeoff timer, altitude and complete flag
-    bool throttle_up = mode_has_manual_throttle(control_mode) && g.rc_3.control_in > 0;
+    bool throttle_up = mode_has_manual_throttle(control_mode) && g.rc_3.get_control_in() > 0;
     if (!throttle_up && ap.land_complete) {
         gndeffect_state.takeoff_time_ms = tnow_ms;
         gndeffect_state.takeoff_alt_cm = inertial_nav.get_altitude();
@@ -69,4 +69,3 @@ void Copter::update_ground_effect_detector(void)
     ahrs.setTakeoffExpected(gndeffect_state.takeoff_expected);
     ahrs.setTouchdownExpected(gndeffect_state.touchdown_expected);
 }
-#endif // GNDEFFECT_COMPENSATION == ENABLED

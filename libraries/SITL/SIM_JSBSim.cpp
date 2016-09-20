@@ -36,7 +36,6 @@ namespace SITL {
 #pragma GCC diagnostic ignored "-Wunused-result"
 
 #define DEBUG_JSBSIM 1
-#define FEET_TO_METERS 0.3048f
 
 JSBSim::JSBSim(const char *home_str, const char *frame_str) :
     Aircraft(home_str, frame_str),
@@ -182,6 +181,7 @@ bool JSBSim::start_JSBSim(void)
     pid_t child_pid = fork();
     if (child_pid == 0) {
         // in child
+        setsid();
         dup2(devnull, 0);
         dup2(p[1], 1);
         close(p[0]);
@@ -423,6 +423,9 @@ void JSBSim::recv_fdm(const struct sitl_input &input)
     airspeed = fdm.vcas * FEET_TO_METERS;
     airspeed_pitot = airspeed;
 
+    // update magnetic field
+    update_mag_field_bf();
+    
     rpm1 = fdm.rpm[0];
     rpm2 = fdm.rpm[1];
     

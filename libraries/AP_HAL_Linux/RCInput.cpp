@@ -1,22 +1,22 @@
-#include <AP_HAL/AP_HAL.h>
-
-#if CONFIG_HAL_BOARD == HAL_BOARD_LINUX
-#include <stdio.h>
-#include <sys/time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <stdint.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+#include <AP_HAL/AP_HAL.h>
+#include <AP_HAL/utility/dsm.h>
 
 #include "RCInput.h"
 #include "sbus.h"
-#include <AP_HAL/utility/dsm.h>
+
+#define MIN_NUM_CHANNELS 5
 
 extern const AP_HAL::HAL& hal;
 
@@ -32,17 +32,17 @@ void RCInput::init()
 {
 }
 
-bool RCInput::new_input() 
+bool RCInput::new_input()
 {
     return new_rc_input;
 }
 
-uint8_t RCInput::num_channels() 
+uint8_t RCInput::num_channels()
 {
     return _num_channels;
 }
 
-uint16_t RCInput::read(uint8_t ch) 
+uint16_t RCInput::read(uint8_t ch)
 {
     new_rc_input = false;
     if (_override[ch]) {
@@ -54,7 +54,7 @@ uint16_t RCInput::read(uint8_t ch)
     return _pwm_values[ch];
 }
 
-uint8_t RCInput::read(uint16_t* periods, uint8_t len) 
+uint8_t RCInput::read(uint16_t* periods, uint8_t len)
 {
     uint8_t i;
     for (i=0; i<len; i++) {
@@ -63,7 +63,7 @@ uint8_t RCInput::read(uint16_t* periods, uint8_t len)
     return len;
 }
 
-bool RCInput::set_overrides(int16_t *overrides, uint8_t len) 
+bool RCInput::set_overrides(int16_t *overrides, uint8_t len)
 {
     bool res = false;
     if(len > LINUX_RC_INPUT_NUM_CHANNELS){
@@ -75,7 +75,7 @@ bool RCInput::set_overrides(int16_t *overrides, uint8_t len)
     return res;
 }
 
-bool RCInput::set_override(uint8_t channel, int16_t override) 
+bool RCInput::set_override(uint8_t channel, int16_t override)
 {
     if (override < 0) return false; /* -1: no change. */
     if (channel < LINUX_RC_INPUT_NUM_CHANNELS) {
@@ -104,7 +104,7 @@ void RCInput::_process_ppmsum_pulse(uint16_t width_usec)
     if (width_usec >= 2700) {
         // a long pulse indicates the end of a frame. Reset the
         // channel counter so next pulse is channel 0
-        if (ppm_state._channel_counter >= 5) {
+        if (ppm_state._channel_counter >= MIN_NUM_CHANNELS) {
             for (uint8_t i=0; i<ppm_state._channel_counter; i++) {
                 _pwm_values[i] = ppm_state._pulse_capt[i];
             }
@@ -162,7 +162,7 @@ void RCInput::_process_sbus_pulse(uint16_t width_s0, uint16_t width_s1)
         // invalid data
         goto reset;
     }
-	
+
     if (bits_s0+bit_ofs > 10) {
         // invalid data as last two bits must be stop bits
         goto reset;
@@ -209,10 +209,10 @@ void RCInput::_process_sbus_pulse(uint16_t width_s0, uint16_t width_s1)
         uint16_t values[LINUX_RC_INPUT_NUM_CHANNELS];
         uint16_t num_values=0;
         bool sbus_failsafe=false, sbus_frame_drop=false;
-        if (sbus_decode(bytes, values, &num_values, 
-                        &sbus_failsafe, &sbus_frame_drop, 
-                        LINUX_RC_INPUT_NUM_CHANNELS) && 
-            num_values >= 5) {
+        if (sbus_decode(bytes, values, &num_values,
+                        &sbus_failsafe, &sbus_frame_drop,
+                        LINUX_RC_INPUT_NUM_CHANNELS) &&
+            num_values >= MIN_NUM_CHANNELS) {
             for (i=0; i<num_values; i++) {
                 _pwm_values[i] = values[i];
             }
@@ -226,7 +226,7 @@ void RCInput::_process_sbus_pulse(uint16_t width_s0, uint16_t width_s1)
     }
     return;
 reset:
-    memset(&sbus_state, 0, sizeof(sbus_state));        
+    memset(&sbus_state, 0, sizeof(sbus_state));
 }
 
 void RCInput::_process_dsm_pulse(uint16_t width_s0, uint16_t width_s1)
@@ -244,7 +244,7 @@ void RCInput::_process_dsm_pulse(uint16_t width_s0, uint16_t width_s1)
 
     byte_ofs = dsm_state.bit_ofs/10;
     bit_ofs = dsm_state.bit_ofs%10;
-    
+
     if(byte_ofs > 15) {
         // invalid data
         goto reset;
@@ -267,7 +267,7 @@ void RCInput::_process_dsm_pulse(uint16_t width_s0, uint16_t width_s1)
             for (i=0; i<16; i++) {
                 // get raw data
                 uint16_t v = dsm_state.bytes[i];
-                
+
                 // check start bit
                 if ((v & 1) != 0) {
                     goto reset;
@@ -280,12 +280,12 @@ void RCInput::_process_dsm_pulse(uint16_t width_s0, uint16_t width_s1)
             }
             uint16_t values[8];
             uint16_t num_values=0;
-            if (dsm_decode(AP_HAL::micros64(), bytes, values, &num_values, 8) && 
-                num_values >= 5) {
+            if (dsm_decode(AP_HAL::micros64(), bytes, values, &num_values, 8) &&
+                num_values >= MIN_NUM_CHANNELS) {
                 for (i=0; i<num_values; i++) {
                     _pwm_values[i] = values[i];
                 }
-                _num_channels = num_values;                
+                _num_channels = num_values;
                 new_rc_input = true;
             }
         }
@@ -304,7 +304,7 @@ void RCInput::_process_dsm_pulse(uint16_t width_s0, uint16_t width_s1)
     dsm_state.bit_ofs += bits_s1;
     return;
 reset:
-    memset(&dsm_state, 0, sizeof(dsm_state));        
+    memset(&dsm_state, 0, sizeof(dsm_state));
 }
 
 /*
@@ -358,13 +358,13 @@ void RCInput::add_dsm_input(const uint8_t *bytes, size_t nbytes)
     }
     const uint8_t dsm_frame_size = sizeof(dsm.frame);
 
-    uint32_t now = AP_HAL::millis();    
+    uint32_t now = AP_HAL::millis();
     if (now - dsm.last_input_ms > 5) {
         // resync based on time
         dsm.partial_frame_count = 0;
     }
     dsm.last_input_ms = now;
-    
+
     while (nbytes > 0) {
         size_t n = nbytes;
         if (dsm.partial_frame_count + n > dsm_frame_size) {
@@ -382,7 +382,7 @@ void RCInput::add_dsm_input(const uint8_t *bytes, size_t nbytes)
             uint16_t values[16] {};
             uint16_t num_values=0;
             if (dsm_decode(AP_HAL::micros64(), dsm.frame, values, &num_values, 16) &&
-                num_values >= 5) {
+                num_values >= MIN_NUM_CHANNELS) {
                 for (uint8_t i=0; i<num_values; i++) {
                     if (values[i] != 0) {
                         _pwm_values[i] = values[i];
@@ -407,4 +407,64 @@ void RCInput::add_dsm_input(const uint8_t *bytes, size_t nbytes)
     }
 }
 
-#endif // CONFIG_HAL_BOARD
+
+/*
+  add some bytes of input in SBUS serial stream format, coping with partial packets
+ */
+void RCInput::add_sbus_input(const uint8_t *bytes, size_t nbytes)
+{
+    if (nbytes == 0) {
+        return;
+    }
+    const uint8_t sbus_frame_size = sizeof(sbus.frame);
+
+    uint32_t now = AP_HAL::millis();
+    if (now - sbus.last_input_ms > 5) {
+        // resync based on time
+        sbus.partial_frame_count = 0;
+    }
+    sbus.last_input_ms = now;
+
+    while (nbytes > 0) {
+        size_t n = nbytes;
+        if (sbus.partial_frame_count + n > sbus_frame_size) {
+            n = sbus_frame_size - sbus.partial_frame_count;
+        }
+        if (n > 0) {
+            memcpy(&sbus.frame[sbus.partial_frame_count], bytes, n);
+            sbus.partial_frame_count += n;
+            nbytes -= n;
+            bytes += n;
+        }
+
+	if (sbus.partial_frame_count == sbus_frame_size) {
+            sbus.partial_frame_count = 0;
+            uint16_t values[16] {};
+            uint16_t num_values=0;
+            bool sbus_failsafe;
+            bool sbus_frame_drop;
+            if (sbus_decode(sbus.frame, values, &num_values, &sbus_failsafe, &sbus_frame_drop, 16) &&
+                num_values >= MIN_NUM_CHANNELS) {
+                for (uint8_t i=0; i<num_values; i++) {
+                    if (values[i] != 0) {
+                        _pwm_values[i] = values[i];
+                    }
+                }
+                /*
+                  the apparent number of channels can change on SBUS,
+                  as they are spread across multiple frames. We just
+                  use the max num_values we get
+                 */
+                if (num_values > _num_channels) {
+                    _num_channels = num_values;
+                }
+                new_rc_input = true;
+#if 0
+                printf("Decoded SBUS %u channels %u %u %u %u %u %u %u %u\n",
+                       (unsigned)num_values,
+                       values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7]);
+#endif
+            }
+        }
+    }
+}

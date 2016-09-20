@@ -138,7 +138,7 @@ AP_GPS_SIRF::read(void)
         case 5:
             if (_gather) {                                              // gather data if requested
                 _accumulate(data);
-                _buffer.bytes[_payload_counter] = data;
+                _buffer[_payload_counter] = data;
                 if (++_payload_counter == _payload_length)
                     _step++;
             } else {
@@ -186,7 +186,7 @@ AP_GPS_SIRF::_parse_gps(void)
         state.location.lng      = swap_int32(_buffer.nav.longitude);
         state.location.alt      = swap_int32(_buffer.nav.altitude_msl);
         state.ground_speed      = swap_int32(_buffer.nav.ground_speed)*0.01f;
-        state.ground_course_cd  = wrap_360_cd(swap_int16(_buffer.nav.ground_course));
+        state.ground_course     = wrap_360(swap_int16(_buffer.nav.ground_course)*0.01f);
         state.num_sats          = _buffer.nav.satellites;
         fill_3d_velocity();
         return true;

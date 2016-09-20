@@ -69,6 +69,8 @@ public:
 		GPS_TYPE_GSOF  = 11,
 		GPS_TYPE_QURT  = 12,
         GPS_TYPE_ERB = 13,
+        GPS_TYPE_MAV = 14,
+		GPS_TYPE_NOVA = 15,
     };
 
     /// GPS status codes
@@ -112,10 +114,10 @@ public:
         uint16_t time_week;                 ///< GPS week number
         Location location;                  ///< last fix location
         float ground_speed;                 ///< ground speed in m/sec
-        int32_t ground_course_cd;           ///< ground course in 100ths of a degree
+        float ground_course;                ///< ground course in degrees
         uint16_t hdop;                      ///< horizontal dilution of precision in cm
         uint16_t vdop;                      ///< vertical dilution of precision in cm
-        uint8_t num_sats;                   ///< Number of visible satelites        
+        uint8_t num_sats;                   ///< Number of visible satellites        
         Vector3f velocity;                  ///< 3D velocitiy in m/s, in NED format
         float speed_accuracy;
         float horizontal_accuracy;
@@ -126,6 +128,9 @@ public:
         bool have_vertical_accuracy:1;
         uint32_t last_gps_time_ms;          ///< the system time we got the last GPS timestamp, milliseconds
     };
+
+    // Pass mavlink data to message handlers (for MAV type)
+    void handle_msg(mavlink_message_t *msg);
 
     // Accessor functions
 
@@ -217,8 +222,14 @@ public:
     }
 
     // ground course in centidegrees
+    float ground_course(uint8_t instance) const {
+        return state[instance].ground_course;
+    }
+    float ground_course() const {
+        return ground_course(primary_instance);
+    }
     int32_t ground_course_cd(uint8_t instance) const {
-        return state[instance].ground_course_cd;
+        return ground_course(instance) * 100;
     }
     int32_t ground_course_cd() const {
         return ground_course_cd(primary_instance);
@@ -282,6 +293,9 @@ public:
         return last_message_time_ms(primary_instance);
     }
 
+    // convert GPS week and millis to unix epoch in ms
+    static uint64_t time_epoch_convert(uint16_t gps_week, uint32_t gps_ms);
+    
     // return last fix time since the 1/1/1970 in microseconds
     uint64_t time_epoch_usec(uint8_t instance);
     uint64_t time_epoch_usec(void) { 
@@ -302,8 +316,11 @@ public:
     // set position for HIL
     void setHIL(uint8_t instance, GPS_Status status, uint64_t time_epoch_ms, 
                 const Location &location, const Vector3f &velocity, uint8_t num_sats,
-                uint16_t hdop, bool _have_vertical_velocity);
+                uint16_t hdop);
 
+    // set accuracy for HIL
+    void setHIL_Accuracy(uint8_t instance, float vdop, float hacc, float vacc, float sacc, bool _have_vertical_velocity, uint32_t sample_ms);
+    
     static const struct AP_Param::GroupInfo var_info[];
 
     // dataflash for logging, if available

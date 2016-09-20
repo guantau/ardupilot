@@ -16,12 +16,12 @@ void Copter::arm_motors_check()
     static int16_t arming_counter;
 
     // ensure throttle is down
-    if (channel_throttle->control_in > 0) {
+    if (channel_throttle->get_control_in() > 0) {
         arming_counter = 0;
         return;
     }
 
-    int16_t tmp = channel_yaw->control_in;
+    int16_t tmp = channel_yaw->get_control_in();
 
     // full right
     if (tmp > 4000) {
@@ -104,7 +104,7 @@ void Copter::auto_disarm_check()
             thr_low = ap.throttle_zero;
         } else {
             float deadband_top = g.rc_3.get_control_mid() + g.throttle_deadzone;
-            thr_low = g.rc_3.control_in <= deadband_top;
+            thr_low = g.rc_3.get_control_in() <= deadband_top;
         }
 
         if (!thr_low || !ap.land_complete) {
@@ -181,9 +181,6 @@ bool Copter::init_arm_motors(bool arming_from_gcs)
     sprayer.test_pump(false);
 #endif
 
-    // short delay to allow reading of rc inputs
-    delay(30);
-
     // enable output to motors
     enable_motor_output();
 
@@ -205,6 +202,12 @@ bool Copter::init_arm_motors(bool arming_from_gcs)
     // flag exiting this function
     in_arm_motors = false;
 
+    // Log time stamp of arming event
+    arm_time_ms = millis();
+
+    // Start the arming delay
+    ap.in_arming_delay = true;
+
     // return success
     return true;
 }
@@ -221,8 +224,8 @@ void Copter::init_disarm_motors()
     gcs_send_text(MAV_SEVERITY_INFO, "Disarming motors");
 #endif
 
-    // save compass offsets learned by the EKF
-    if (ahrs.use_compass()) {
+    // save compass offsets learned by the EKF if enabled
+    if (ahrs.use_compass() && compass.get_learn_type() == Compass::LEARN_EKF) {
         for(uint8_t i=0; i<COMPASS_MAX_INSTANCES; i++) {
             Vector3f magOffsets;
             if (ahrs.getMagOffsets(i, magOffsets)) {
@@ -250,29 +253,49 @@ void Copter::init_disarm_motors()
     mission.reset();
 
     // suspend logging
-    if (!(g.log_bitmask & MASK_LOG_WHEN_DISARMED)) {
+    if (!DataFlash.log_while_disarmed()) {
         DataFlash.EnableWrites(false);
     }
 
     // disable gps velocity based centrefugal force compensation
     ahrs.set_correct_centrifugal(false);
     hal.util->set_soft_armed(false);
+
+    ap.in_arming_delay = false;
 }
 
 // motors_output - send output to motors library which will adjust and send to ESCs and servos
 void Copter::motors_output()
 {
+#if ADVANCED_FAILSAFE == ENABLED
+    // this is to allow the failsafe module to deliberately crash 
+    // the vehicle. Only used in extreme circumstances to meet the
+    // OBC rules
+    if (g2.afs.should_crash_vehicle()) {
+        g2.afs.terminate_vehicle();
+        return;
+    }
+#endif
+
+    // Update arming delay state
+    if (ap.in_arming_delay && (!motors.armed() || millis()-arm_time_ms > ARMING_DELAY_SEC*1.0e3f || control_mode == THROW)) {
+        ap.in_arming_delay = false;
+    }
+
     // check if we are performing the motor test
     if (ap.motor_test) {
         motor_test_output();
     } else {
-        if (!ap.using_interlock){
-            // if not using interlock switch, set according to Emergency Stop status
-            // where Emergency Stop is forced false during arming if Emergency Stop switch
-            // is not used. Interlock enabled means motors run, so we must
-            // invert motor_emergency_stop status for motors to run.
-            motors.set_interlock(!ap.motor_emergency_stop);
+        bool interlock = motors.armed() && !ap.in_arming_delay && (!ap.using_interlock || ap.motor_interlock_switch) && !ap.motor_emergency_stop;
+        if (!motors.get_interlock() && interlock) {
+            motors.set_interlock(true);
+            Log_Write_Event(DATA_MOTORS_INTERLOCK_ENABLED);
+        } else if (motors.get_interlock() && !interlock) {
+            motors.set_interlock(false);
+            Log_Write_Event(DATA_MOTORS_INTERLOCK_DISABLED);
         }
+
+        // send output signals to motors
         motors.output();
     }
 }
@@ -288,7 +311,7 @@ void Copter::lost_vehicle_check()
     }
 
     // ensure throttle is down, motors not armed, pitch and roll rc at max. Note: rc1=roll rc2=pitch
-    if (ap.throttle_zero && !motors.armed() && (channel_roll->control_in > 4000) && (channel_pitch->control_in > 4000)) {
+    if (ap.throttle_zero && !motors.armed() && (channel_roll->get_control_in() > 4000) && (channel_pitch->get_control_in() > 4000)) {
         if (soundalarm_counter >= LOST_VEHICLE_DELAY) {
             if (AP_Notify::flags.vehicle_lost == false) {
                 AP_Notify::flags.vehicle_lost = true;

@@ -82,6 +82,10 @@ const AP_Param::GroupInfo AP_MotorsTri::var_info[] = {
 // init
 void AP_MotorsTri::Init()
 {
+    add_motor_num(AP_MOTORS_MOT_1);
+    add_motor_num(AP_MOTORS_MOT_2);
+    add_motor_num(AP_MOTORS_MOT_4);
+    
     // set update rate for the 3 motors (but not the servo on channel 7)
     set_update_rate(_speed_hz);
 
@@ -120,22 +124,22 @@ void AP_MotorsTri::enable()
 
 void AP_MotorsTri::output_to_motors()
 {
-    switch (_multicopter_flags.spool_mode) {
+    switch (_spool_mode) {
         case SHUT_DOWN:
             // sends minimum values out to the motors
             hal.rcout->cork();
-            rc_write(AP_MOTORS_MOT_1, _throttle_radio_min);
-            rc_write(AP_MOTORS_MOT_2, _throttle_radio_min);
-            rc_write(AP_MOTORS_MOT_4, _throttle_radio_min);
+            rc_write(AP_MOTORS_MOT_1, get_pwm_output_min());
+            rc_write(AP_MOTORS_MOT_2, get_pwm_output_min());
+            rc_write(AP_MOTORS_MOT_4, get_pwm_output_min());
             rc_write(AP_MOTORS_CH_TRI_YAW, _yaw_servo_trim);
             hal.rcout->push();
             break;
         case SPIN_WHEN_ARMED:
             // sends output to motors when armed but not flying
             hal.rcout->cork();
-            rc_write(AP_MOTORS_MOT_1, constrain_int16(_throttle_radio_min + _throttle_low_end_pct * _min_throttle, _throttle_radio_min, _throttle_radio_min + _min_throttle));
-            rc_write(AP_MOTORS_MOT_2, constrain_int16(_throttle_radio_min + _throttle_low_end_pct * _min_throttle, _throttle_radio_min, _throttle_radio_min + _min_throttle));
-            rc_write(AP_MOTORS_MOT_4, constrain_int16(_throttle_radio_min + _throttle_low_end_pct * _min_throttle, _throttle_radio_min, _throttle_radio_min + _min_throttle));
+            rc_write(AP_MOTORS_MOT_1, calc_spin_up_to_pwm());
+            rc_write(AP_MOTORS_MOT_2, calc_spin_up_to_pwm());
+            rc_write(AP_MOTORS_MOT_4, calc_spin_up_to_pwm());
             rc_write(AP_MOTORS_CH_TRI_YAW, _yaw_servo_trim);
             hal.rcout->push();
             break;
@@ -173,12 +177,10 @@ void AP_MotorsTri::output_armed_stabilizing()
     float   yaw_thrust;                 // yaw thrust input value, +/- 1.0
     float   throttle_thrust;            // throttle thrust input value, 0.0 - 1.0
     float   throttle_thrust_best_rpy;   // throttle providing maximum roll, pitch and yaw range without climbing
-    float   throttle_thrust_rpy_mix;    // partial calculation of throttle_thrust_best_rpy
     float   rpy_scale = 1.0f;           // this is used to scale the roll, pitch and yaw to fit within the motor limits
     float   rpy_low = 0.0f;             // lowest motor value
     float   rpy_high = 0.0f;            // highest motor value
     float   thr_adj;                    // the difference between the pilot's desired throttle and throttle_thrust_best_rpy
-    float   throttle_thrust_hover = get_hover_throttle_as_high_end_pct();   // throttle hover thrust value, 0.0 - 1.0
 
     // sanity check YAW_SV_ANGLE parameter value to avoid divide by zero
     _yaw_servo_angle_max_deg = constrain_float(_yaw_servo_angle_max_deg, AP_MOTORS_TRI_SERVO_RANGE_DEG_MIN, AP_MOTORS_TRI_SERVO_RANGE_DEG_MAX);
@@ -209,7 +211,7 @@ void AP_MotorsTri::output_armed_stabilizing()
         limit.throttle_upper = true;
     }
 
-    throttle_thrust_rpy_mix = MAX(throttle_thrust, throttle_thrust*MAX(0.0f,1.0f-_throttle_rpy_mix)+throttle_thrust_hover*_throttle_rpy_mix);
+    _throttle_avg_max = constrain_float(_throttle_avg_max, throttle_thrust, _throttle_thrust_max);
 
     // The following mix may be offer less coupling between axis but needs testing
     //_thrust_right = roll_thrust * -0.5f + pitch_thrust * 1.0f;
@@ -246,7 +248,7 @@ void AP_MotorsTri::output_armed_stabilizing()
     //      We will choose #2 (a mix of pilot and hover throttle) only when the throttle is quite low.  We favor reducing throttle instead of better yaw control because the pilot has commanded it
 
     // check everything fits
-    throttle_thrust_best_rpy = MIN(0.5f*thrust_max - (rpy_low+rpy_high)/2.0, throttle_thrust_rpy_mix);
+    throttle_thrust_best_rpy = MIN(0.5f*thrust_max - (rpy_low+rpy_high)/2.0, _throttle_avg_max);
     if(is_zero(rpy_low)){
         rpy_scale = 1.0f;
     } else {
@@ -339,4 +341,25 @@ int16_t AP_MotorsTri::calc_yaw_radio_output(float yaw_input, float yaw_input_max
     }
 
     return ret;
+}
+
+/*
+  call vehicle supplied thrust compensation if set. This allows for
+  vehicle specific thrust compensation for motor arrangements such as
+  the forward motors tilting
+*/
+void AP_MotorsTri::thrust_compensation(void)
+{
+    if (_thrust_compensation_callback) {
+        // convert 3 thrust values into an array indexed by motor number
+        float thrust[4] { _thrust_right, _thrust_left, 0, _thrust_rear };
+
+        // apply vehicle supplied compensation function
+        _thrust_compensation_callback(thrust, 4);
+
+        // extract compensated thrust values
+        _thrust_right = thrust[0];
+        _thrust_left  = thrust[1];
+        _thrust_rear  = thrust[3];
+    }
 }

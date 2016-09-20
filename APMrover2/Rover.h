@@ -13,13 +13,10 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-/* 
+/*
    main Rover class, containing all vehicle specific state
 */
 #pragma once
-
-#define THISFIRMWARE "ArduRover v3.0.0"
-#define FIRMWARE_VERSION 3,0,0,FIRMWARE_VERSION_TYPE_OFFICIAL
 
 #include <cmath>
 #include <stdarg.h>
@@ -55,7 +52,6 @@
 #include <AP_ServoRelayEvents/AP_ServoRelayEvents.h>
 #include <AP_Mount/AP_Mount.h>		// Camera/Antenna mount
 #include <AP_Camera/AP_Camera.h>		// Camera triggering
-#include <GCS_MAVLink/GCS_MAVLink.h>    // MAVLink GCS definitions
 #include <AP_SerialManager/AP_SerialManager.h>   // Serial manager library
 #include <AP_Airspeed/AP_Airspeed.h>    // needed for AHRS build
 #include <AP_Vehicle/AP_Vehicle.h>     // needed for AHRS build
@@ -76,6 +72,7 @@
 #include <AP_BattMonitor/AP_BattMonitor.h> // Battery monitor library
 #include <AP_OpticalFlow/AP_OpticalFlow.h>     // Optical Flow library
 #include <AP_RSSI/AP_RSSI.h>                   // RSSI Library
+#include <AP_Button/AP_Button.h>
 
 // Configuration
 #include "config.h"
@@ -83,7 +80,7 @@
 // Local modules
 #include "defines.h"
 #include "Parameters.h"
-#include <GCS_MAVLink/GCS.h>
+#include "GCS_Mavlink.h"
 
 #include <AP_Declination/AP_Declination.h> // ArduPilot Mega Declination Helper Library
 
@@ -93,7 +90,7 @@
 
 class Rover : public AP_HAL::HAL::Callbacks {
 public:
-    friend class GCS_MAVLINK;
+    friend class GCS_MAVLINK_Rover;
     friend class Parameters;
     friend class AP_Arming;
 
@@ -128,7 +125,7 @@ private:
     RC_Channel *channel_throttle;
     RC_Channel *channel_learn;
 
-    DataFlash_Class DataFlash{FIRMWARE_STRING};
+    DataFlash_Class DataFlash;
 
     bool in_log_download;
 
@@ -138,6 +135,7 @@ private:
     Compass compass;
     AP_InertialSensor ins;
     RangeFinder sonar { serial_manager };
+    AP_Button button;
 
     // flight modes convenience array
     AP_Int8	*modes;
@@ -179,7 +177,7 @@ private:
     // GCS handling
     AP_SerialManager serial_manager;
     const uint8_t num_gcs;
-    GCS_MAVLINK gcs[MAVLINK_COMM_NUM_BUFFERS];
+    GCS_MAVLINK_Rover gcs[MAVLINK_COMM_NUM_BUFFERS];
 
     // relay support
     AP_Relay relay;
@@ -288,8 +286,8 @@ private:
     // Battery Sensors
     AP_BattMonitor battery;
 
-    // Battery Sensors
 #if FRSKY_TELEM_ENABLED == ENABLED
+    // FrSky telemetry support
     AP_Frsky_Telem frsky_telemetry;
 #endif
 
@@ -398,7 +396,6 @@ private:
     void send_location(mavlink_channel_t chan);
     void send_nav_controller_output(mavlink_channel_t chan);
     void send_servo_out(mavlink_channel_t chan);
-    void send_radio_out(mavlink_channel_t chan);
     void send_vfr_hud(mavlink_channel_t chan);
     void send_simstate(mavlink_channel_t chan);
     void send_hwstatus(mavlink_channel_t chan);
@@ -458,6 +455,7 @@ private:
     void reset_control_switch();
     void read_trim_switch();
     void update_events(void);
+    void button_update(void);
     void navigate();
     void set_control_channels(void);
     void init_rc_in();
@@ -467,7 +465,7 @@ private:
     bool throttle_failsafe_active();
     void trim_control_surfaces();
     void trim_radio();
-    void init_barometer(void);
+    void init_barometer(bool full_calibration);
     void init_sonar(void);
     void read_battery(void);
     void read_receiver_rssi(void);
@@ -498,7 +496,6 @@ private:
     void check_usb_mux(void);
     uint8_t check_digital_pin(uint8_t pin);
     bool should_log(uint32_t mask);
-    void frsky_telemetry_send(void);
     void print_hit_enter();    
     void gcs_send_text_fmt(MAV_SEVERITY severity, const char *fmt, ...);
     void print_mode(AP_HAL::BetterStream *port, uint8_t mode);
@@ -506,13 +503,16 @@ private:
     bool verify_command(const AP_Mission::Mission_Command& cmd);
     bool verify_command_callback(const AP_Mission::Mission_Command& cmd);
     void do_nav_wp(const AP_Mission::Mission_Command& cmd);
+    void do_loiter_unlimited(const AP_Mission::Mission_Command& cmd);
     bool verify_nav_wp(const AP_Mission::Mission_Command& cmd);
+    bool verify_loiter_unlim();
     void do_wait_delay(const AP_Mission::Mission_Command& cmd);
     void do_within_distance(const AP_Mission::Mission_Command& cmd);
     void do_change_speed(const AP_Mission::Mission_Command& cmd);
     void do_set_home(const AP_Mission::Mission_Command& cmd);
     void do_digicam_configure(const AP_Mission::Mission_Command& cmd);
     void do_digicam_control(const AP_Mission::Mission_Command& cmd);
+    void do_set_reverse(const AP_Mission::Mission_Command& cmd);
     void init_capabilities(void);
     void rudder_arm_disarm_check();
     void change_arm_state(void);

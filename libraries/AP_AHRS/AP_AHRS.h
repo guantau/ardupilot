@@ -162,6 +162,16 @@ public:
         return _baro;
     }
 
+    // get the index of the current primary accelerometer sensor
+    virtual uint8_t get_primary_accel_index(void) const {
+        return _ins.get_primary_accel();
+    }
+
+    // get the index of the current primary gyro sensor
+    virtual uint8_t get_primary_gyro_index(void) const {
+        return _ins.get_primary_gyro();
+    }
+    
     // accelerometer values in the earth frame in m/s/s
     virtual const Vector3f &get_accel_ef(uint8_t i) const {
         return _accel_ef[i];
@@ -188,6 +198,11 @@ public:
         return nullptr;
     }
 
+    // is the EKF backend doing its own sensor logging?
+    virtual bool have_ekf_logging(void) const {
+        return false;
+    }
+    
     // Euler angles (radians)
     float roll;
     float pitch;
@@ -288,12 +303,21 @@ public:
         return false;
     }
 
+    // return a position relative to home in meters, North/East
+    // order. Return true if estimate is valid
+    virtual bool get_relative_position_NE(Vector2f &vecNE) const {
+        return false;
+    }
+
+    // return a Down position relative to home in meters
+    // Return true if estimate is valid
+    virtual bool get_relative_position_D(float &posD) const {
+        return false;
+    }
+
     // return ground speed estimate in meters/second. Used by ground vehicles.
-    float groundspeed(void) const {
-        if (_gps.status() <= AP_GPS::NO_FIX) {
-            return 0.0f;
-        }
-        return _gps.ground_speed();
+    float groundspeed(void) {
+        return groundspeed_vector().length();
     }
 
     // return true if we will use compass for yaw

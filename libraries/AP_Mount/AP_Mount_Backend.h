@@ -67,7 +67,7 @@ public:
     virtual void control_msg(mavlink_message_t* msg);
 
     // status_msg - called to allow mounts to send their status to GCS via MAVLink
-    virtual void status_msg(mavlink_channel_t chan) {};
+    virtual void status_msg(mavlink_channel_t chan) {}
 
     // handle a GIMBAL_REPORT message
     virtual void handle_gimbal_report(mavlink_channel_t chan, mavlink_message_t *msg) {}
@@ -94,7 +94,7 @@ protected:
     MAV_MOUNT_MODE get_mode(void) const { return _frontend.get_mode(_instance); }
 
     AP_Mount    &_frontend; // reference to the front end which holds parameters
-    AP_Mount::mount_state &_state;    // refernce to the parameters and state for this backend
+    AP_Mount::mount_state &_state;    // references to the parameters and state for this backend
     uint8_t     _instance;  // this instance's number
     Vector3f    _angle_ef_target_rad;   // desired earth-frame roll, tilt and vehicle-relative pan angles in radians
 };

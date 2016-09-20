@@ -23,6 +23,8 @@
 #define AP_COMPASS_TYPE_AK8963_MPU9250  0x06
 #define AP_COMPASS_TYPE_AK8963_I2C      0x07
 #define AP_COMPASS_TYPE_LSM303D         0x08
+#define AP_COMPASS_TYPE_LSM9DS1         0x09
+#define AP_COMPASS_TYPE_BMM150          0x0A
 
 // motor compensation types (for use with motor_comp_enabled)
 #define AP_COMPASS_MOT_COMP_DISABLED    0x00
@@ -273,7 +275,7 @@ public:
 
     // HIL methods
     void        setHIL(uint8_t instance, float roll, float pitch, float yaw);
-    void        setHIL(uint8_t instance, const Vector3f &mag);
+    void        setHIL(uint8_t instance, const Vector3f &mag, uint32_t last_update_usec);
     const Vector3f&   getHIL(uint8_t instance) const;
     void        _setup_earth_field();
 
@@ -294,6 +296,17 @@ public:
         Vector3f field[COMPASS_MAX_INSTANCES];
     } _hil;
 
+    enum LearnType {
+        LEARN_NONE=0,
+        LEARN_INTERNAL=1,
+        LEARN_EKF=2
+    };
+
+    // return the chosen learning type
+    enum LearnType get_learn_type(void) const {
+        return (enum LearnType)_learn.get();
+    }
+    
 private:
     /// Register a new compas driver, allocating an instance number
     ///
@@ -301,7 +314,7 @@ private:
     uint8_t register_compass(void);
 
     // load backend drivers
-    void _add_backend(AP_Compass_Backend *backend);
+    bool _add_backend(AP_Compass_Backend *backend, const char *name, bool external);
     void _detect_backends(void);
 
     //keep track of number of calibration reports sent

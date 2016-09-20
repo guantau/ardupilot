@@ -8,6 +8,7 @@
 
 #define CRASH_DETECTION_DELAY_MS            500
 #define IS_FLYING_IMPACT_TIMER_MS           3000
+#define GPS_IS_FLYING_SPEED_CMS             150
 
 /*
   Do we think we are flying?
@@ -19,16 +20,19 @@ void Plane::update_is_flying_5Hz(void)
     bool is_flying_bool;
     uint32_t now_ms = AP_HAL::millis();
 
-    uint32_t ground_speed_thresh_cm = (g.min_gndspeed_cm > 0) ? ((uint32_t)(g.min_gndspeed_cm*0.9f)) : 500;
+    uint32_t ground_speed_thresh_cm = (g.min_gndspeed_cm > 0) ? ((uint32_t)(g.min_gndspeed_cm*0.9f)) : GPS_IS_FLYING_SPEED_CMS;
     bool gps_confirmed_movement = (gps.status() >= AP_GPS::GPS_OK_FIX_3D) &&
                                     (gps.ground_speed_cm() >= ground_speed_thresh_cm);
 
     // airspeed at least 75% of stall speed?
     bool airspeed_movement = ahrs.airspeed_estimate(&aspeed) && (aspeed >= (aparm.airspeed_min*0.75f));
 
-    if(arming.is_armed()) {
-        // when armed assuming flying and we need overwhelming evidence that we ARE NOT flying
 
+    if (quadplane.is_flying()) {
+        is_flying_bool = true;
+
+    } else if(arming.is_armed()) {
+        // when armed assuming flying and we need overwhelming evidence that we ARE NOT flying
         // short drop-outs of GPS are common during flight due to banking which points the antenna in different directions
         bool gps_lost_recently = (gps.last_fix_time_ms() > 0) && // we have locked to GPS before
                         (gps.status() < AP_GPS::GPS_OK_FIX_2D) && // and it's lost now
@@ -126,10 +130,6 @@ void Plane::update_is_flying_5Hz(void)
         isFlyingProbability = (0.85f * isFlyingProbability) + (0.15f * (float)is_flying_bool);
     }
 
-    if (quadplane.is_flying()) {
-        is_flying_bool = true;
-    }
-    
     /*
       update last_flying_ms so we always know how long we have not
       been flying for. This helps for crash detection and auto-disarm
@@ -154,6 +154,7 @@ void Plane::update_is_flying_5Hz(void)
         }
     }
     previous_is_flying = new_is_flying;
+    adsb.set_is_flying(new_is_flying);
 
     crash_detection_update();
 
